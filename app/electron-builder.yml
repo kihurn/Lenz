@@ -1,0 +1,21 @@
+appId: app.lenz.client
+productName: Lenz
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**
+  - package.json
+extraResources:
+  - from: native/ocr/build/lenz-ocr
+    to: lenz-ocr
+mac:
+  target:
+    - target: dmg
+      arch: [arm64]
+  category: public.app-category.education
+  darkModeSupport: true
+  # No Apple Developer ID: build-mac.sh applies an ad-hoc signature instead.
+  identity: null
+dmg:
+  title: Lenz
