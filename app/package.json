@@ -25,6 +25,8 @@
   "productName": "Lenz",
   "private": true,
   "dependencies": {
+    "@mozilla/readability": "0.6.0",
+    "linkedom": "0.18.13",
     "zod": "4.6.7"
   }
 }
