@@ -35,13 +35,14 @@ interface Prefs {
 const PREFS_KEY = 'lenz.prefs'
 let prefs: Prefs = { speed: 'accurate', think: false, search: false, mode: 'auto' }
 try {
-  prefs = { ...prefs, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') }
+  prefs = { ...prefs, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}'), mode: 'auto' }
 } catch {
   /* defaults */
 }
 const savePrefs = () => {
   try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs))
+    // The Text/Image override applies to one capture only, so it is not remembered.
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ ...prefs, mode: 'auto' }))
   } catch {
     /* ignore */
   }
@@ -204,6 +205,13 @@ function showError(code: ErrorCode, message: string): void {
 
 function onEvent(e: AskEvent): void {
   switch (e.type) {
+    case 'cleared':
+      // A hotkey capture replaced the conversation (any answer in progress was stopped).
+      setStreaming(false)
+      clearThread()
+      prefs.mode = 'auto'
+      syncToggles()
+      break
     case 'capture':
       if (!streaming) clearThread()
       el.capture.hidden = false

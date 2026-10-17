@@ -101,6 +101,7 @@ export function selectRegion(c: CaptureResult, display: Display): Promise<Rect |
     enableLargerThanScreen: true,
     hasShadow: false,
     alwaysOnTop: true,
+    acceptFirstMouse: true,
     webPreferences: secure
   })
   win.setAlwaysOnTop(true, 'screen-saver')
@@ -133,6 +134,7 @@ export function selectRegion(c: CaptureResult, display: Display): Promise<Rect |
     win.webContents.once('did-finish-load', () => {
       win.webContents.send(IPC.regionImage, c.png.toString('base64'))
       win.show()
+      app.focus({ steal: true })
       win.focus()
     })
     load(win, 'region')

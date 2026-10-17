@@ -36,6 +36,8 @@ export interface AskRequest {
 }
 
 export type AskEvent =
+  /** A new capture replaced the conversation; the panel should drop the old one. */
+  | { type: 'cleared' }
   | { type: 'status'; text: string }
   | { type: 'capture'; thumbnailDataUrl: string; mode: InputMode }
   | { type: 'thinking'; active: boolean }

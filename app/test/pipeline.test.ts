@@ -278,6 +278,49 @@ describe('pipeline', () => {
     expect(mock.chatBodies()).toHaveLength(1)
   })
 
+  it('captureNow tells the panel to drop the old conversation first', async () => {
+    const { p, events } = await setup()
+    await p.captureNow()
+    expect(events[0]).toEqual({ type: 'cleared' })
+  })
+
+  it('captureNow during a stream ends the old answer with cleared, not silence', async () => {
+    const { p, events } = await setup({ tokens: ['1', '2', '3', '4', '5', '6'], delayMs: 40 })
+    const a = p.ask(ask())
+    await new Promise((r) => setTimeout(r, 150))
+    await p.captureNow()
+    await a
+    const cleared = events.findIndex((e) => e.type === 'cleared')
+    expect(cleared).toBeGreaterThan(types(events).indexOf('token'))
+    expect(events.slice(cleared).some((e) => e.type === 'token')).toBe(false)
+    expect(events.filter((e) => e.type === 'done' || e.type === 'error')).toHaveLength(0)
+  })
+
+  it('an older capture finishing late does not replace a newer one', async () => {
+    const releases: (() => void)[] = []
+    const { p, mock } = await setup(
+      {},
+      {
+        capture: () =>
+          new Promise((r) => {
+            const name = releases.length === 0 ? 'old' : 'new'
+            releases.push(() => r({ png: Buffer.from(name), thumbnailDataUrl: `data:,${name}` }))
+          }),
+        ocr: async (png) => ({ text: `${png.toString()} `.repeat(100), confidence: 0.95, coverage: 0.5 })
+      }
+    )
+    const first = p.captureNow()
+    await Promise.resolve()
+    const second = p.captureNow()
+    await Promise.resolve()
+    releases[1]!() // newer capture finishes first
+    await second
+    releases[0]!() // older one finishes late
+    await first
+    await p.ask(ask({ newCapture: false }))
+    expect(mock.lastChatBody().messages.at(-1).content).toContain('<screen>\nnew')
+  })
+
   it('captureNow accepts a ready-made region capture', async () => {
     const { p, events, captures } = await setup()
     await p.captureNow({ png: Buffer.from('region'), thumbnailDataUrl: 'data:image/png;base64,cmVnaW9u' })

@@ -25,8 +25,6 @@ function thumbnail(img: Electron.NativeImage): string {
  * Lenz's own panel is hidden during the capture so it never appears in it.
  */
 export async function captureDisplayUnderCursor(panel?: BrowserWindow): Promise<{ capture: CaptureResult; display: Display }> {
-  if (screenPermission() === 'denied') throw new CaptureError('permission', 'Screen Recording permission denied')
-
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
   const wasVisible = panel?.isVisible() ?? false
   if (wasVisible) {
@@ -41,11 +39,11 @@ export async function captureDisplayUnderCursor(panel?: BrowserWindow): Promise<
         height: Math.round(display.size.height * display.scaleFactor)
       }
     })
+    // getSources is what makes macOS show the permission prompt the first time, so check
+    // afterwards. Without permission macOS returns wallpaper-only or empty images.
+    if (screenPermission() !== 'granted') throw new CaptureError('permission', 'Screen Recording not allowed')
     const source = sources.find((s) => s.display_id === String(display.id)) ?? sources[0]
-    if (!source || source.thumbnail.isEmpty()) {
-      // macOS returns no image when permission was not granted.
-      throw new CaptureError('permission', 'No screen image returned')
-    }
+    if (!source || source.thumbnail.isEmpty()) throw new CaptureError('failed', 'No screen image returned')
     return { capture: { png: source.thumbnail.toPNG(), thumbnailDataUrl: thumbnail(source.thumbnail) }, display }
   } catch (e) {
     if (e instanceof CaptureError) throw e

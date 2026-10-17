@@ -6,6 +6,18 @@ Mac can show. Run them with `npm run mock-ollama` + `npm run dev` first, then ag
 
 Write down anything that fails, with what you did and what you saw.
 
+## Check these first
+
+These three can only be checked on a real Mac, and they matter most:
+
+- [ ] **Lenz is not in its own capture:** with the panel hidden *and* with it showing,
+      press ⌘⇧Space over a slide. The thumbnail shows only the slide, and the answer
+      doesn't mention Lenz's buttons or previous answers.
+- [ ] **First-run permission prompt:** on a fresh install, the first ⌘⇧Space shows macOS's
+      Screen Recording prompt, and Lenz appears in System Settings → Screen Recording.
+- [ ] **Area select from another app:** with Preview in front, press ⌘⇧X and drag immediately;
+      the selection starts where you clicked. Try again and press Esc; it cancels.
+
 ## First run and permissions
 
 - [ ] `npm run build:ocr` succeeds and creates `native/ocr/build/lenz-ocr`.
@@ -20,7 +32,7 @@ Write down anything that fails, with what you did and what you saw.
 - [ ] Panel appears over a full-screen app (e.g. a full-screen PDF in Preview).
 - [ ] Panel follows you to other desktops (Spaces).
 - [ ] Panel can be dragged by its top bar and resized; position is remembered after restart.
-- [ ] Esc hides the panel; ⌘⇧L shows and hides it.
+- [ ] Esc hides the panel; ⌘⇧L shows and hides it; ⌘W hides it (Lenz keeps running).
 - [ ] Light and dark mode both look right (System Settings → Appearance).
 
 ## Capture
@@ -48,7 +60,9 @@ Try each, and check the label under the thumbnail:
 - [ ] Quick actions (Explain, Step-by-step, Summarize, Quiz me, Define) each work.
 - [ ] Think toggle shows "Thinking it through…" before the answer (needs a model that can think).
 - [ ] Fast toggle uses the smaller model (check Ollama's log on the PC, or answer speed).
-- [ ] Pressing ⌘⇧Space while an answer is streaming stops it and starts fresh.
+- [ ] Pressing ⌘⇧Space while an answer is streaming stops it, clears the panel and starts fresh
+      (Stop button disappears, no leftover "Capturing…" text).
+- [ ] The Auto/Text/Image toggle goes back to Auto after each new capture.
 
 ## Search
 

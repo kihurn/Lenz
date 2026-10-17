@@ -112,11 +112,15 @@ export function createPipeline(deps: PipelineDeps) {
       if (myGen === generation) deps.emit(e)
     }
     try {
+      emit({ type: 'cleared' })
       emit({ type: 'status', text: 'Capturing…' })
       const task = (async () => {
         const st: CaptureState = { capture: c ?? (await deps.capture()), announced: false }
-        state = st
-        history = []
+        // A newer capture may have started meanwhile; never let an older one replace it.
+        if (myGen === generation) {
+          state = st
+          history = []
+        }
         return st
       })()
       pendingCapture = task
@@ -163,14 +167,20 @@ export function createPipeline(deps: PipelineDeps) {
     try {
       // 1. Screen: capture (or reuse), OCR, choose text or image.
       if (!req.newCapture && pendingCapture) {
-        await pendingCapture.catch(() => undefined)
+        // Adopt the newest hotkey capture still in flight instead of capturing again.
+        const adopted = await pendingCapture.catch(() => null)
         check()
+        if (adopted && state !== adopted) {
+          state = adopted
+          history = []
+        }
       }
       if (req.newCapture || !state) {
         emit({ type: 'status', text: 'Capturing…' })
-        state = { capture: await deps.capture(), announced: false }
-        history = []
+        const captured = await deps.capture()
         check()
+        state = { capture: captured, announced: false }
+        history = []
       }
       const st = state
       if (!st.ocr) emit({ type: 'status', text: 'Reading screen…' })

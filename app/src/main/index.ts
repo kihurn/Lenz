@@ -3,12 +3,13 @@ import { app, globalShortcut, ipcMain, shell, type BrowserWindow } from 'electro
 import { IPC } from '../shared/ipc'
 import type { AskEvent, ConnectionReport, Settings } from '../shared/types'
 import { captureDisplayUnderCursor, cropCapture } from './capture'
+import { captureErrorEvent, captureThenShow } from './hotkey-flow'
 import { isSafeExternalUrl, parseAskRequest } from './guards'
 import { nativeImageOps } from './native-image-ops'
 import { ocrHelperPath, runOcr } from './ocr'
 import { createOllamaClient } from './ollama'
 import { openScreenRecordingSettings } from './permissions'
-import { CaptureError, createPipeline } from './pipeline'
+import { createPipeline } from './pipeline'
 import { pingSearxng, runSearch } from './search'
 import { loadSettings, saveSettings, SettingsSchema } from './settings'
 import { createPanel, selectRegion } from './windows'
@@ -36,13 +37,27 @@ const pipeline = createPipeline({
   emit
 })
 
+let capturing = false
+
+/** Screenshot first, then show the panel, so Lenz is never in its own capture. */
 async function onCaptureHotkey(): Promise<void> {
-  const capturing = pipeline.captureNow()
-  showPanel()
-  await capturing
+  if (capturing) return
+  capturing = true
+  try {
+    await captureThenShow({
+      capture: async () => (await captureDisplayUnderCursor(panel)).capture,
+      show: showPanel,
+      captureNow: (c) => pipeline.captureNow(c),
+      onError: (e) => emit(captureErrorEvent(e))
+    })
+  } finally {
+    capturing = false
+  }
 }
 
 async function onRegionHotkey(): Promise<void> {
+  if (capturing) return
+  capturing = true
   try {
     const { capture, display } = await captureDisplayUnderCursor(panel)
     const rect = await selectRegion(capture, display)
@@ -51,15 +66,9 @@ async function onRegionHotkey(): Promise<void> {
     await pipeline.captureNow(cropCapture(capture, rect, display.scaleFactor))
   } catch (e) {
     showPanel()
-    const permission = e instanceof CaptureError && e.kind === 'permission'
-    emit({
-      type: 'error',
-      code: permission ? 'permission_screen' : 'unknown',
-      message: permission
-        ? 'Lenz needs Screen Recording permission to see your screen.'
-        : `Couldn't capture the screen: ${String((e as Error)?.message ?? e)}`,
-      partial: false
-    })
+    emit(captureErrorEvent(e))
+  } finally {
+    capturing = false
   }
 }
 
@@ -143,6 +152,14 @@ if (!app.requestSingleInstanceLock()) {
   void app.whenReady().then(() => {
     settings = loadSettings(settingsFile())
     panel = createPanel()
+    // ⌘W hides the panel; only Quit (⌘Q) ends Lenz.
+    let quitting = false
+    app.on('before-quit', () => (quitting = true))
+    panel.on('close', (e) => {
+      if (quitting) return
+      e.preventDefault()
+      panel.hide()
+    })
     registerIpc()
     panel.webContents.once('did-finish-load', () => {
       registerHotkeys()
