@@ -251,6 +251,53 @@ describe('pipeline', () => {
     expect(events.filter((e) => e.type === 'token').length).toBeLessThan(5)
   })
 
+  it('captureNow captures, reads the screen and announces it without asking', async () => {
+    const { p, events, captures, mock } = await setup()
+    await p.captureNow()
+    expect(captures()).toBe(1)
+    expect(events.find((e) => e.type === 'capture')).toMatchObject({ mode: 'text' })
+    expect(mock.chatBodies()).toHaveLength(0)
+  })
+
+  it('ask after captureNow reuses the capture and its OCR', async () => {
+    let ocrCalls = 0
+    const { p, captures, mock } = await setup(
+      {},
+      {
+        ocr: async () => {
+          ocrCalls++
+          return denseText
+        }
+      }
+    )
+    const pending = p.captureNow()
+    await p.ask(ask({ newCapture: false }))
+    await pending
+    expect(captures()).toBe(1)
+    expect(ocrCalls).toBe(1)
+    expect(mock.chatBodies()).toHaveLength(1)
+  })
+
+  it('captureNow accepts a ready-made region capture', async () => {
+    const { p, events, captures } = await setup()
+    await p.captureNow({ png: Buffer.from('region'), thumbnailDataUrl: 'data:image/png;base64,cmVnaW9u' })
+    expect(captures()).toBe(0)
+    expect(events.find((e) => e.type === 'capture')).toMatchObject({ thumbnailDataUrl: 'data:image/png;base64,cmVnaW9u' })
+  })
+
+  it('captureNow reports permission errors', async () => {
+    const { p, events } = await setup(
+      {},
+      {
+        capture: async () => {
+          throw new CaptureError('permission', 'denied')
+        }
+      }
+    )
+    await p.captureNow()
+    expect(errorOf(events)).toMatchObject({ code: 'permission_screen' })
+  })
+
   it('setCapture supplies a region capture for the next ask', async () => {
     const { p, events, captures } = await setup()
     p.setCapture({ png: Buffer.from('region'), thumbnailDataUrl: 'data:image/png;base64,cmVnaW9u' })

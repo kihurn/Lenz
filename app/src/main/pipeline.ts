@@ -42,8 +42,10 @@ class Aborted extends Error {}
 
 interface CaptureState {
   capture: CaptureResult
-  /** undefined = OCR not run yet; null = OCR failed. */
-  ocr: OcrResult | null | undefined
+  /** Started once per capture and shared, so a hotkey capture and the ask that follows OCR only once. */
+  ocr?: Promise<OcrResult | null>
+  /** Whether the renderer has been sent this capture's thumbnail. */
+  announced: boolean
 }
 
 function describeError(e: unknown, model: string, partial: boolean): { code: ErrorCode; message: string } {
@@ -85,6 +87,8 @@ export function createPipeline(deps: PipelineDeps) {
   let history: Turn[] = []
   let current: AbortController | null = null
   let generation = 0
+  /** A hotkey capture still in progress; an ask that arrives meanwhile waits for it instead of capturing again. */
+  let pendingCapture: Promise<CaptureState> | null = null
 
   function stop(): void {
     generation++
@@ -94,8 +98,43 @@ export function createPipeline(deps: PipelineDeps) {
 
   function setCapture(c: CaptureResult): void {
     stop()
-    state = { capture: c, ocr: undefined }
+    state = { capture: c, announced: false }
     history = []
+  }
+
+  const readScreen = (st: CaptureState) => (st.ocr ??= deps.ocr(st.capture.png))
+
+  /** Hotkey path: capture (or take a region capture) and OCR it right away, while the user types. */
+  async function captureNow(c?: CaptureResult): Promise<void> {
+    stop()
+    const myGen = generation
+    const emit = (e: AskEvent) => {
+      if (myGen === generation) deps.emit(e)
+    }
+    try {
+      emit({ type: 'status', text: 'Capturing…' })
+      const task = (async () => {
+        const st: CaptureState = { capture: c ?? (await deps.capture()), announced: false }
+        state = st
+        history = []
+        return st
+      })()
+      pendingCapture = task
+      let st: CaptureState
+      try {
+        st = await task
+      } finally {
+        if (pendingCapture === task) pendingCapture = null
+      }
+      emit({ type: 'status', text: 'Reading screen…' })
+      const ocr = await readScreen(st)
+      if (myGen !== generation || state !== st) return
+      st.announced = true
+      emit({ type: 'capture', thumbnailDataUrl: st.capture.thumbnailDataUrl, mode: decideMode(ocr) })
+    } catch (e) {
+      const { code, message } = describeError(e, '', false)
+      emit({ type: 'error', code, message, partial: false })
+    }
   }
 
   function reset(): void {
@@ -123,25 +162,29 @@ export function createPipeline(deps: PipelineDeps) {
 
     try {
       // 1. Screen: capture (or reuse), OCR, choose text or image.
-      let fresh = false
+      if (!req.newCapture && pendingCapture) {
+        await pendingCapture.catch(() => undefined)
+        check()
+      }
       if (req.newCapture || !state) {
         emit({ type: 'status', text: 'Capturing…' })
-        state = { capture: await deps.capture(), ocr: undefined }
+        state = { capture: await deps.capture(), announced: false }
         history = []
         check()
       }
-      if (state.ocr === undefined) {
-        emit({ type: 'status', text: 'Reading screen…' })
-        state.ocr = await deps.ocr(state.capture.png)
-        check()
-        fresh = true
-      }
-      const mode = decideMode(state.ocr, req.modeOverride)
-      const screen: ScreenContext = { mode, ocrText: state.ocr?.text ?? '' }
+      const st = state
+      if (!st.ocr) emit({ type: 'status', text: 'Reading screen…' })
+      const ocr = await readScreen(st)
+      check()
+      const mode = decideMode(ocr, req.modeOverride)
+      const screen: ScreenContext = { mode, ocrText: ocr?.text ?? '' }
       if (mode === 'image') {
-        screen.imageBase64 = encodeImage(state.capture.png, state.ocr, s.imageMaxSide, deps.imageOps).base64
+        screen.imageBase64 = encodeImage(st.capture.png, ocr, s.imageMaxSide, deps.imageOps).base64
       }
-      if (fresh || req.modeOverride) emit({ type: 'capture', thumbnailDataUrl: state.capture.thumbnailDataUrl, mode })
+      if (!st.announced || req.modeOverride) {
+        st.announced = true
+        emit({ type: 'capture', thumbnailDataUrl: st.capture.thumbnailDataUrl, mode })
+      }
 
       // 2. Make sure the PC answers before doing anything slow.
       const client = deps.ollama(s.serverUrl)
@@ -237,7 +280,7 @@ export function createPipeline(deps: PipelineDeps) {
     }
   }
 
-  return { ask, stop, setCapture, reset }
+  return { ask, stop, captureNow, setCapture, reset }
 }
 
 export type Pipeline = ReturnType<typeof createPipeline>

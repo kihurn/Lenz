@@ -26,3 +26,9 @@ export interface LenzApi {
   openScreenSettings(): void
   hidePanel(): void
 }
+
+/** The API the preload script exposes to the region-select overlay as `window.lenzRegion`. */
+export interface RegionApi {
+  onImage(cb: (pngBase64: string) => void): void
+  submit(rect: { x: number; y: number; width: number; height: number } | null): void
+}
