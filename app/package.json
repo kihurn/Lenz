@@ -1,0 +1,24 @@
+{
+  "name": "lenz",
+  "version": "0.1.0",
+  "description": "Screen-aware study assistant",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "vitest run"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "electron": "44.8.0",
+    "electron-vite": "6.0.0",
+    "happy-dom": "21.0.3",
+    "typescript": "7.0.2",
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
+  },
+  "productName": "Lenz",
+  "private": true
+}
