@@ -129,7 +129,7 @@ export function createOllamaClient(baseUrl: string, fetchImpl: typeof fetch = fe
       const decoder = new TextDecoder()
       let buffer = ''
       while (true) {
-        let read: ReadableStreamReadResult<Uint8Array>
+        let read: Awaited<ReturnType<typeof reader.read>>
         try {
           read = await reader.read()
         } catch (e) {
