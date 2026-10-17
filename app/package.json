@@ -20,5 +20,8 @@
     "vitest": "5.0.5"
   },
   "productName": "Lenz",
-  "private": true
+  "private": true,
+  "dependencies": {
+    "zod": "4.6.7"
+  }
 }
