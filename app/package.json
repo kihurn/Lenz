@@ -8,7 +8,8 @@
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
-    "mock-ollama": "tsx scripts/mock-ollama.ts"
+    "mock-ollama": "tsx scripts/mock-ollama.ts",
+    "build:ocr": "bash scripts/build-ocr.sh"
   },
   "license": "UNLICENSED",
   "devDependencies": {
