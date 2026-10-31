@@ -59,6 +59,11 @@ describe('settings', () => {
     expect(s.maxAnswerTokens).toBe(700)
   })
 
+  it('raises the old 512-token answer limit to the new default', () => {
+    writeFileSync(file, JSON.stringify({ maxAnswerTokens: 512 }))
+    expect(loadSettings(file).maxAnswerTokens).toBe(1536)
+  })
+
   it('keeps models the user chose themselves', () => {
     writeFileSync(file, JSON.stringify({ models: { accurate: 'gemma4:e4b', fast: 'qwen3-vl:4b-instruct' } }))
     expect(loadSettings(file).models).toEqual({ ...DEFAULT_SETTINGS.models, accurate: 'gemma4:e4b' })

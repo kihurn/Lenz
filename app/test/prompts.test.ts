@@ -3,6 +3,7 @@ import {
   buildMessages,
   buildQueryMessages,
   MAX_HISTORY_TURNS,
+  recentHistory,
   MAX_OCR_CHARS,
   resolveQuestion,
   SYSTEM_PROMPT,
@@ -106,5 +107,19 @@ describe('prompts', () => {
     expect(msgs[0]!.role).toBe('system')
     expect(msgs[1]!.content).toContain('Penicillin')
     expect(msgs[1]!.content).toContain('who discovered this?')
+  })
+})
+
+describe('recentHistory', () => {
+  const turns = (n: number, len: number): Turn[] =>
+    Array.from({ length: n }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', text: String(i).padEnd(len, 'x') }) as Turn)
+
+  it('keeps the last six turns when they are short', () => {
+    expect(recentHistory(turns(10, 10)).map((t) => t.text[0])).toEqual(['4', '5', '6', '7', '8', '9'])
+  })
+
+  it('drops older turns past the character budget and never starts on an answer', () => {
+    const kept = recentHistory(turns(6, 2500))
+    expect(kept.map((t) => t.text[0])).toEqual(['4', '5'])
   })
 })

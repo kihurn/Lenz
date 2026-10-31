@@ -53,7 +53,7 @@ export const DEFAULT_SETTINGS: Settings = {
     region: 'CommandOrControl+Shift+X',
     toggle: 'CommandOrControl+Shift+L'
   },
-  maxAnswerTokens: 512,
+  maxAnswerTokens: 1536,
   imageMaxSide: 1280,
   search: { results: 5, pagesToRead: 2, pageTimeoutMs: 2500, budgetMs: 4000 },
   quickActions: [
@@ -83,6 +83,8 @@ const LEGACY: Record<string, Record<string, string>> = {
 
 function migrate(stored: Json): Json {
   const out: Json = { ...stored }
+  // 512 was the old default and cut longer answers short.
+  if (out.maxAnswerTokens === 512) out.maxAnswerTokens = DEFAULT_SETTINGS.maxAnswerTokens
   if (isObject(out.models)) out.models = { ...out.models }
   for (const [path, map] of Object.entries(LEGACY)) {
     const [a, b] = path.split('.') as [string, string?]

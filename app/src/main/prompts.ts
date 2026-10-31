@@ -16,6 +16,21 @@ export const SYSTEM_PROMPT = [
 ].join('\n')
 
 export const MAX_HISTORY_TURNS = 6
+/** Earlier turns sent with a question, newest first, up to ~1,500 tokens so the screen always fits. */
+export const MAX_HISTORY_CHARS = 6000
+
+/** The most recent turns that fit the budget, kept in order and starting on a question. */
+export function recentHistory(history: Turn[], maxTurns = MAX_HISTORY_TURNS, maxChars = MAX_HISTORY_CHARS): Turn[] {
+  const out: Turn[] = []
+  let chars = 0
+  for (const t of history.slice(-maxTurns).reverse()) {
+    if (chars + t.text.length > maxChars) break
+    chars += t.text.length
+    out.unshift(t)
+  }
+  while (out[0]?.role === 'assistant') out.shift()
+  return out
+}
 export const MAX_OCR_CHARS = 6000
 
 export interface Turn {
@@ -77,7 +92,7 @@ export function buildMessages(args: {
 
   return [
     { role: 'system', content: SYSTEM_PROMPT },
-    ...history.slice(-MAX_HISTORY_TURNS).map((t) => ({ role: t.role, content: t.text })),
+    ...recentHistory(history).map((t) => ({ role: t.role, content: t.text })),
     final
   ]
 }

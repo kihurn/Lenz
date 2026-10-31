@@ -41,6 +41,8 @@ export const TEMPERATURE = 0.3
 export const QUERY_MAX_TOKENS = 30
 export const PING_TIMEOUT_MS = 3000
 export const LOADING_HINT_MS = 1500
+/** Extra room for the thinking model's reasoning, which counts against the length limit. */
+export const THINK_EXTRA_TOKENS = 3072
 export const MODEL_SWITCH_NOTICE = 'Switching model — the first answer takes a few extra seconds while it loads.'
 
 /** Think uses the thinking model; otherwise Fast or Accurate. */
@@ -331,7 +333,7 @@ export function createPipeline(deps: PipelineDeps) {
             model,
             messages: buildMessages({ screen, history, question, search }),
             think: req.think,
-            numPredict: s.maxAnswerTokens,
+            numPredict: req.think ? s.maxAnswerTokens + THINK_EXTRA_TOKENS : s.maxAnswerTokens,
             numCtx: NUM_CTX,
             temperature: TEMPERATURE
           },

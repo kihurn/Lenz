@@ -272,7 +272,14 @@ function onEvent(e: AskEvent): void {
       if (turn) {
         scheduleRender(turn, true)
         turn.status.textContent = ''
-        if (e.truncated) note(turn, 'Answer cut short — ask "continue" for more.')
+        if (e.truncated) {
+          note(
+            turn,
+            turn.text
+              ? 'Answer cut short — ask "continue" for more.'
+              : 'Ran out of room while thinking — try again with Think off, or ask a narrower question.'
+          )
+        }
       }
       setStreaming(false)
       break

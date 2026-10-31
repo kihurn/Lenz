@@ -107,7 +107,7 @@ describe('pipeline', () => {
     const b = mock.lastChatBody()
     expect(b.model).toBe('qwen3-vl:8b-instruct')
     expect(b.think).toBe(false)
-    expect(b.options).toEqual({ temperature: 0.3, num_ctx: 8192, num_predict: 512 })
+    expect(b.options).toEqual({ temperature: 0.3, num_ctx: 8192, num_predict: 1536 })
   })
 
   it('uses fast model when speed is fast', async () => {
@@ -120,6 +120,8 @@ describe('pipeline', () => {
     const { p, mock } = await setup()
     await p.ask(ask({ think: true, speed: 'fast' }))
     expect(mock.lastChatBody()).toMatchObject({ model: 'qwen3-vl:8b', think: true })
+    // thinking counts against the limit, so Think gets extra room
+    expect(mock.lastChatBody().options.num_predict).toBe(1536 + 3072)
   })
 
   it('warns once when switching to or from the thinking model', async () => {
