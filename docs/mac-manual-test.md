@@ -69,6 +69,9 @@ Try each, and check the label under the thumbnail:
 - [ ] Ask a question, switch to another tab, then ask "what am I looking at now?": Lenz shows
       "Took a new look at your screen" in the conversation and answers about the new tab.
 - [ ] An ordinary follow-up ("explain step 2 more") does not take a new screenshot.
+- [ ] Open with ⌘⇧L and ask "what is photosynthesis?": no screenshot ("Chatting — no screen"), quick answer.
+- [ ] Then ask "explain this": Lenz takes a screenshot and answers about the screen.
+- [ ] **Add screen** takes a screenshot and explains it without clearing the chat.
 
 ## History
 

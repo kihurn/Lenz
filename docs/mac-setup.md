@@ -91,6 +91,10 @@ Header toggles:
 - **Auto / Text / Image**: what Lenz sends. Auto sends just the recognised text when the
   screen is mostly text (fastest) and the image for diagrams, graphs and handwriting.
 
+Lenz is also a normal chatbot: open it with ⌘⇧L and type, and it only looks at your screen when
+your question points at it ("explain this", "solve question 3", "what's on my screen?") or you press
+a quick action. **Add screen** makes it look at any time.
+
 Follow-ups reuse the same screenshot, so they're fast. If you've moved on (another tab, page or
 app), just ask something like "what am I looking at now?", "what about this page?" or "look again".
 Lenz takes a new screenshot and the conversation carries on. ⌘Enter always captures first.

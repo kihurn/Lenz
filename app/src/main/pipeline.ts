@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { turnLabel, type AskEvent, type AskRequest, type Conversation, type ErrorCode, type Settings, type Source, type StoredTurn } from '../shared/types'
-import { wantsFreshLook } from './fresh-look'
+import { needsScreen, wantsFreshLook } from './fresh-look'
 import { OllamaError, type OllamaClient } from './ollama'
 import { decideMode, encodeImage, type ImageOps, type OcrResult } from './prepare'
 import { buildMessages, buildQueryMessages, resolveQuestion, type ScreenContext, type SearchContext, type Turn } from './prompts'
@@ -199,7 +199,7 @@ export function createPipeline(deps: PipelineDeps) {
     newConversation()
   }
 
-  /** Continues a saved chat: its turns become the history; the next ask looks at the screen afresh. */
+  /** Continues a saved chat: its turns become the history; the screen is looked at again only if needed. */
   function resume(c: Conversation): void {
     stop()
     state = null
@@ -241,27 +241,38 @@ export function createPipeline(deps: PipelineDeps) {
       }
       // A follow-up about what's on screen *now* takes a new look but keeps the conversation.
       const fresh = !req.newCapture && !!state && history.length > 0 && wantsFreshLook(req.question)
-      if (req.newCapture || !state || fresh) {
-        emit({ type: 'status', text: fresh ? 'Taking a new look…' : 'Capturing…' })
+      // With no screenshot yet, only look when the question needs it; otherwise just chat.
+      const look =
+        req.newCapture ||
+        !!req.lookNow ||
+        fresh ||
+        (!state && (!!req.actionId || needsScreen(req.question, history.length === 0)))
+      if (look) {
+        emit({ type: 'status', text: fresh || req.lookNow ? 'Taking a new look…' : 'Capturing…' })
         const captured = await deps.capture()
         check()
-        // A resumed chat (no screen yet) keeps its history too; only an explicit new capture resets it.
+        // Only an explicit new capture resets the conversation; a new look carries on.
         if (req.newCapture) newConversation()
         state = { capture: captured, announced: false }
-        state.fresh = fresh || history.length > 0
+        state.fresh = history.length > 0
       }
       const st = state
-      if (!st.ocr) emit({ type: 'status', text: 'Reading screen…' })
-      const ocr = await readScreen(st)
-      check()
-      const mode = decideMode(ocr, req.modeOverride)
-      const screen: ScreenContext = { mode, ocrText: ocr?.text ?? '' }
-      if (mode === 'image') {
-        screen.imageBase64 = encodeImage(st.capture.png, ocr, s.imageMaxSide, deps.imageOps).base64
-      }
-      if (!st.announced || req.modeOverride) {
-        st.announced = true
-        emit({ type: 'capture', thumbnailDataUrl: st.capture.thumbnailDataUrl, mode, ...(st.fresh ? { fresh: true } : {}) })
+      let screen: ScreenContext | undefined
+      if (st) {
+        if (!st.ocr) emit({ type: 'status', text: 'Reading screen…' })
+        const ocr = await readScreen(st)
+        check()
+        const mode = decideMode(ocr, req.modeOverride)
+        screen = { mode, ocrText: ocr?.text ?? '' }
+        if (mode === 'image') {
+          screen.imageBase64 = encodeImage(st.capture.png, ocr, s.imageMaxSide, deps.imageOps).base64
+        }
+        if (!st.announced || req.modeOverride) {
+          st.announced = true
+          emit({ type: 'capture', thumbnailDataUrl: st.capture.thumbnailDataUrl, mode, ...(st.fresh ? { fresh: true } : {}) })
+        }
+      } else {
+        emit({ type: 'noscreen' })
       }
 
       // 2. Make sure the PC answers before doing anything slow.
@@ -291,7 +302,7 @@ export function createPipeline(deps: PipelineDeps) {
             for await (const c of client.chat(
               {
                 model,
-                messages: buildQueryMessages(question, screen.ocrText),
+                messages: buildQueryMessages(question, screen?.ocrText ?? ''),
                 think: false,
                 numPredict: QUERY_MAX_TOKENS,
                 numCtx: NUM_CTX,
@@ -363,7 +374,7 @@ export function createPipeline(deps: PipelineDeps) {
         const action = req.actionId ? s.quickActions.find((a) => a.id === req.actionId) : undefined
         const turn: StoredTurn = { label: turnLabel(req.question, action?.label), question, answer, at: Date.now() }
         if (sources?.length) turn.sources = sources
-        if (recordedCapture !== st) turn.thumbnailDataUrl = st.capture.thumbnailDataUrl
+        if (st && recordedCapture !== st) turn.thumbnailDataUrl = st.capture.thumbnailDataUrl
         recordedCapture = st
         try {
           deps.record(conv.id, conv.createdAt, turn)

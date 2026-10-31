@@ -313,6 +313,16 @@ svg {
   border-radius: 7px;
   box-shadow: 0 0 0 0.5px var(--line-strong);
 }
+.capture.no-screen {
+  padding: 7px 12px;
+}
+.capture.no-screen .capture-meta {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
 .capture-meta {
   display: flex;
   flex-direction: column;

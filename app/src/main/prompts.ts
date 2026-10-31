@@ -6,8 +6,9 @@ import type { OllamaMessage } from './ollama'
  * lets Ollama reuse its prompt cache, which keeps answers fast.
  */
 export const SYSTEM_PROMPT = [
-  'You are Lenz, a concise study tutor. The student is looking at their screen.',
-  'Ground your answer in the screen content and, when given, the web search results.',
+  'You are Lenz, a concise study tutor.',
+  'When a <screen> block is given, the student is looking at it: ground your answer in it.',
+  'With no <screen> block, chat normally as a helpful tutor. Use web search results when given.',
   'Match the length the student asks for. Default to a short, direct answer; go into detail only when asked.',
   'Write math as $...$ inline or $$...$$ on its own line. Use Markdown for lists and code.',
   'If part of the screen is unreadable or missing, say so instead of guessing.',
@@ -77,18 +78,19 @@ function webBlock(search: SearchContext): string {
 }
 
 export function buildMessages(args: {
-  screen: ScreenContext
+  /** Absent when chatting without a screenshot. */
+  screen?: ScreenContext
   history: Turn[]
   question: string
   search?: SearchContext
 }): OllamaMessage[] {
   const { screen, history, question, search } = args
-  const parts = [screenBlock(screen)]
+  const parts = screen ? [screenBlock(screen)] : []
   if (search) parts.push(webBlock(search))
   parts.push(question)
 
   const final: OllamaMessage = { role: 'user', content: parts.join('\n\n') }
-  if (screen.mode === 'image' && screen.imageBase64) final.images = [screen.imageBase64]
+  if (screen?.mode === 'image' && screen.imageBase64) final.images = [screen.imageBase64]
 
   return [
     { role: 'system', content: SYSTEM_PROMPT },
@@ -102,9 +104,10 @@ const QUERY_PROMPT =
   'using the screen text for context. Reply with the query only, no quotes or explanation.'
 
 export function buildQueryMessages(question: string, ocrText: string): OllamaMessage[] {
-  const screen = fence(ocrText.trim().slice(0, 1000))
+  const text = ocrText.trim()
+  const screen = text ? `<screen>\n${fence(text.slice(0, 1000))}\n</screen>\n\n` : ''
   return [
     { role: 'system', content: QUERY_PROMPT },
-    { role: 'user', content: `<screen>\n${screen}\n</screen>\n\nQuestion: ${question}` }
+    { role: 'user', content: `${screen}Question: ${question}` }
   ]
 }

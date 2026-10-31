@@ -36,7 +36,10 @@ export interface AskRequest {
   think: boolean
   speed: Speed
   modeOverride?: InputMode
+  /** Start over with a new screenshot (⌘Enter, New capture). */
   newCapture: boolean
+  /** Take a screenshot now but keep the conversation (Add screen). */
+  lookNow?: boolean
 }
 
 export type AskEvent =
@@ -45,6 +48,8 @@ export type AskEvent =
   | { type: 'status'; text: string }
   /** `fresh`: a follow-up took a new look; the conversation carries on. */
   | { type: 'capture'; thumbnailDataUrl: string; mode: InputMode; fresh?: boolean }
+  /** This answer is a plain chat: no screenshot in the conversation. */
+  | { type: 'noscreen' }
   | { type: 'thinking'; active: boolean }
   | { type: 'token'; text: string }
   | { type: 'sources'; sources: Source[] }

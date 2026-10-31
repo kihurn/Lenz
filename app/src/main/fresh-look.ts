@@ -33,3 +33,35 @@ export function wantsFreshLook(question: string): boolean {
     .trim()
   return q !== '' && RULES.some((r) => r.test(q))
 }
+
+/** Words that point at something visible, so a question about it needs the screen. */
+const SCREEN_RULES: RegExp[] = [
+  /\b(?:on|from|of|in) (?:my|the) (?:screen|display|monitor)\b/,
+  /\bscreen(?:shot)?\b/,
+  /\b(?:page|tab|window|slide|diagram|graph|chart|picture|image|photo|figure|table|worksheet|equation|formula|map|video|website|site|article|paragraph|passage|text|code|error|email|document|pdf)\b[^.?!]{0,20}\b(?:shown|showing|open|here|above|below)\b/,
+  /\b(?:this|that|these|those) (?:page|tab|window|slide|diagram|graph|chart|picture|image|photo|figure|table|worksheet|equation|formula|map|video|website|site|article|paragraph|passage|text|code|error|email|document|pdf|question|problem|exercise|answer|word|sentence|one|part|bit)\b/,
+  /\b(?:question|problem|exercise|q|no\.?|number|part)\s*\d+[a-z]?\b/,
+  /\b(?:can|do) you see\b/,
+  /\b(?:look|looking) at\b/,
+  /\b(?:what's|what is|whats) (?:this|that|here)\b/,
+  /\b(?:highlighted|selected|underlined|circled)\b/
+]
+
+/** "this", "that", "here": on a first question with no screen yet, these usually mean the screen. */
+const POINTING =
+  /\b(?:this|these|those|here)\b|\bthat\b(?=\s*(?:[?.!,]|$)|\s+(?:is|was|means?|says?|shows?|one|thing|part|word|bit|stuff)\b)/
+
+/**
+ * Whether a question in a chat that has no screenshot should take one.
+ * `firstQuestion`: no conversation yet, so a bare "explain this" must mean the screen.
+ */
+export function needsScreen(question: string, firstQuestion: boolean): boolean {
+  const q = question
+    .toLowerCase()
+    .replace(/[‘’]/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!q) return true // an empty ask (e.g. "Add screen") is about the screen
+  if (wantsFreshLook(q) || SCREEN_RULES.some((r) => r.test(q))) return true
+  return firstQuestion && POINTING.test(q)
+}

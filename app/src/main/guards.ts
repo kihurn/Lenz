@@ -17,7 +17,8 @@ const AskRequestSchema = z.object({
   think: z.boolean(),
   speed: z.enum(['fast', 'accurate']),
   modeOverride: z.enum(['text', 'image']).optional(),
-  newCapture: z.boolean()
+  newCapture: z.boolean(),
+  lookNow: z.boolean().optional()
 })
 
 /** Validates an ask coming from the renderer; unknown fields are dropped. */

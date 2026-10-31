@@ -16,6 +16,7 @@ const el = {
   capture: $('#capture'),
   thumb: $<HTMLImageElement>('#thumb'),
   modeLabel: $('#mode-label'),
+  recapture: $<HTMLButtonElement>('#recapture'),
   thread: $('#thread'),
   empty: $('#empty'),
   notice: $('#notice'),
@@ -164,6 +165,18 @@ function renderSources(t: TurnView, sources: Source[]): void {
   t.root.append(list)
 }
 
+let hasScreen = false
+
+/** The strip above the chat when there's no screenshot: a label and "Add screen". */
+function showNoScreen(label: string): void {
+  hasScreen = false
+  el.capture.hidden = false
+  el.capture.classList.add('no-screen')
+  el.thumb.hidden = true
+  el.modeLabel.textContent = label
+  el.recapture.textContent = 'Add screen'
+}
+
 /** A marker in the thread where a follow-up took a new screenshot. */
 function markNewLook(thumb: string): void {
   const mark = document.createElement('div')
@@ -234,11 +247,18 @@ function onEvent(e: AskEvent): void {
       prefs.mode = 'auto'
       syncToggles()
       break
+    case 'noscreen':
+      showNoScreen('Chatting — no screen')
+      break
     case 'capture':
       if (e.fresh) markNewLook(e.thumbnailDataUrl)
       else if (!streaming) clearThread()
       el.capture.hidden = false
+      el.capture.classList.remove('no-screen')
+      el.thumb.hidden = false
       el.thumb.src = e.thumbnailDataUrl
+      hasScreen = true
+      el.recapture.textContent = 'New capture'
       el.modeLabel.textContent = e.fresh
         ? 'Took a new look'
         : e.mode === 'text'
@@ -305,11 +325,11 @@ function send(req: AskRequest, label: string): void {
   window.lenz.ask(req)
 }
 
-function ask(opts: { actionId?: string; newCapture?: boolean } = {}): void {
+function ask(opts: { actionId?: string; newCapture?: boolean; lookNow?: boolean } = {}): void {
   if (streaming) window.lenz.stop()
   const question = el.question.value.trim()
   const action = opts.actionId ? settings.quickActions.find((a) => a.id === opts.actionId) : undefined
-  if (!question && !action && !opts.newCapture && el.capture.hidden) return
+  if (!question && !action && !opts.newCapture && !opts.lookNow && el.capture.hidden) return
   const label = turnLabel(question, action?.label)
   el.question.value = ''
   autosize()
@@ -321,7 +341,8 @@ function ask(opts: { actionId?: string; newCapture?: boolean } = {}): void {
       think: prefs.think,
       speed: prefs.speed,
       modeOverride: prefs.mode === 'auto' ? undefined : prefs.mode,
-      newCapture: opts.newCapture ?? false
+      newCapture: opts.newCapture ?? false,
+      ...(opts.lookNow ? { lookNow: true } : {})
     },
     label
   )
@@ -361,7 +382,8 @@ el.stop.addEventListener('click', () => {
   setStreaming(false)
   if (turn) turn.status.textContent = ''
 })
-$('#recapture').addEventListener('click', () => ask({ newCapture: true }))
+// With a screenshot: start over with a new one. Without: look at the screen, keeping the chat.
+el.recapture.addEventListener('click', () => ask(hasScreen ? { newCapture: true } : { lookNow: true }))
 $('#hide').addEventListener('click', () => window.lenz.hidePanel())
 $('#open-settings').addEventListener('click', () => void openSettings())
 $('#open-history').addEventListener('click', () => void openHistory())
@@ -423,6 +445,7 @@ function newChat(): void {
   lastRequest = null
   clearThread()
   el.capture.hidden = true
+  hasScreen = false
 }
 
 async function openConversation(id: string): Promise<void> {
@@ -440,10 +463,7 @@ async function openConversation(id: string): Promise<void> {
     if (t.sources) renderSources(v, t.sources)
   }
   turn = null
-  const thumb = [...c.turns].reverse().find((t) => t.thumbnailDataUrl)?.thumbnailDataUrl
-  el.capture.hidden = !thumb
-  if (thumb) el.thumb.src = thumb
-  el.modeLabel.textContent = 'Saved chat · your next question takes a new look'
+  showNoScreen('Saved chat · Lenz looks at your screen only when needed')
   showView('chat')
   scrollDown()
 }

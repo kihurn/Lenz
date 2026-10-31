@@ -187,7 +187,7 @@ describe('pipeline', () => {
     expect(saved).toEqual([])
   })
 
-  it('resumes a saved chat: history is sent and the next ask captures afresh into the same chat', async () => {
+  it('resumes a saved chat: history is sent, plain follow-ups chat, screen questions look', async () => {
     const saved: string[] = []
     const { p, mock, captures, events } = await setup({}, { record: (id) => saved.push(id) })
     const id = '00000000-0000-4000-8000-000000000001'
@@ -199,12 +199,56 @@ describe('pipeline', () => {
       turns: [{ label: 'old q', question: 'old q', answer: 'old a', at: 2 }]
     })
     await p.ask(ask({ question: 'and a follow-up', newCapture: false }))
-    expect(captures()).toBe(1)
+    expect(captures()).toBe(0)
     const msgs = mock.lastChatBody().messages
     expect(msgs[1]).toMatchObject({ role: 'user', content: 'old q' })
     expect(msgs[2]).toMatchObject({ role: 'assistant', content: 'old a' })
     expect(saved).toEqual([id])
+    await p.ask(ask({ question: "what's on my screen?", newCapture: false }))
+    expect(captures()).toBe(1)
+    expect(saved).toEqual([id, id])
     expect(events.find((e) => e.type === 'capture')).toMatchObject({ fresh: true })
+  })
+
+  it('chats without a screenshot when the question does not need the screen', async () => {
+    const { p, events, mock, captures } = await setup()
+    await p.ask(ask({ question: 'what is photosynthesis?', newCapture: false }))
+    expect(captures()).toBe(0)
+    expect(events.some((e) => e.type === 'noscreen')).toBe(true)
+    expect(events.some((e) => e.type === 'capture')).toBe(false)
+    const last = mock.lastChatBody().messages.at(-1)
+    expect(last.content).toBe('what is photosynthesis?')
+    expect(last.images).toBeUndefined()
+    expect(errorOf(events)).toBeUndefined()
+  })
+
+  it('looks at the screen when the first question points at it', async () => {
+    const { p, captures, mock } = await setup()
+    await p.ask(ask({ question: 'explain this', newCapture: false }))
+    expect(captures()).toBe(1)
+    expect(mock.lastChatBody().messages.at(-1).content).toContain('<screen>')
+  })
+
+  it('quick actions always look at the screen', async () => {
+    const { p, captures } = await setup()
+    await p.ask(ask({ question: '', actionId: 'summarize', newCapture: false }))
+    expect(captures()).toBe(1)
+  })
+
+  it('Add screen (lookNow) captures but keeps the chat going', async () => {
+    const { p, captures, mock, events } = await setup()
+    await p.ask(ask({ question: 'what is photosynthesis?', newCapture: false }))
+    await p.ask(ask({ question: '', newCapture: false, lookNow: true }))
+    expect(captures()).toBe(1)
+    expect(mock.lastChatBody().messages).toHaveLength(4)
+    expect(events.find((e) => e.type === 'capture')).toMatchObject({ fresh: true })
+  })
+
+  it('a plain chat follow-up stays without a screenshot', async () => {
+    const { p, captures } = await setup()
+    await p.ask(ask({ question: 'what is photosynthesis?', newCapture: false }))
+    await p.ask(ask({ question: 'explain that more simply', newCapture: false }))
+    expect(captures()).toBe(0)
   })
 
   it('sends the saved C0RE key', async () => {
