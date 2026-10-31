@@ -175,25 +175,24 @@ async function main(): Promise<void> {
     }
   }
 
-  // Summary
-  console.log('\nMode       Right    Median time  Median first words')
+  // Summary (printed, and at the top of the report)
+  const summary = ['Mode       Right    Median time  Median first words']
   for (const mode of modes) {
     const rs = results.filter((r) => r.mode === mode)
     const graded = rs.filter((r) => r.grade !== '?')
     const right = graded.filter((r) => r.grade === '✓').length
     const total = median(rs.flatMap((r) => (r.timing ? [r.timing.totalMs] : [])))
     const first = median(rs.flatMap((r) => (r.timing?.firstTokenMs !== undefined ? [r.timing.firstTokenMs] : [])))
-    console.log(
-      `${MODE_LABEL[mode].padEnd(10)} ${`${right}/${graded.length}`.padEnd(8)} ${sec(total).padEnd(12)} ${sec(first)}`
-    )
+    summary.push(`${MODE_LABEL[mode].padEnd(10)} ${`${right}/${graded.length}`.padEnd(8)} ${sec(total).padEnd(12)} ${sec(first)}`)
   }
+  console.log(`\n${summary.join('\n')}`)
 
   // Full report with every answer, for checking the "?" ones and wrong answers.
   const dir = join(EVAL, 'results')
   mkdirSync(dir, { recursive: true })
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
   const file = join(dir, `${stamp}.md`)
-  const lines = [`# Lenz eval ${new Date().toLocaleString()}`, '', `Server: ${s.serverUrl}`, '']
+  const lines = [`# Lenz eval ${new Date().toLocaleString()}`, '', `Server: ${s.serverUrl}`, '', '```', ...summary, '```', '']
   for (const c of cases) {
     lines.push(`## ${c.id}`, '', `**Q:** ${c.question}${c.screen ? ` _(screen: ${c.screen})_` : ''}${c.search ? ' _(search on)_' : ''}`, '')
     for (const r of results.filter((x) => x.id === c.id)) {

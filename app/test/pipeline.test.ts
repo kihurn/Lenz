@@ -128,6 +128,25 @@ describe('pipeline', () => {
     expect((events.at(-1) as Extract<AskEvent, { type: 'done' }>).timing).toMatchObject({ mode: 'Accurate' })
   })
 
+  it('cuts Think off when it reasons too long without answering, and answers with Accurate', async () => {
+    const { p, mock, events } = await setup(
+      { thinking: Array(40).fill('hmm '), tokens: ['A'], delayMs: 20 },
+      { thinkMaxMs: 150 }
+    )
+    await p.ask(ask({ think: true }))
+    const models = mock.chatBodies().filter((b) => b.messages.length).map((b) => b.model)
+    expect(models).toEqual(['qwen3-vl:8b', 'qwen3-vl:8b-instruct'])
+    expect(events.some((e) => e.type === 'notice' && e.text.includes('Thinking ran too long'))).toBe(true)
+    expect(tokens(events)).toBe('A')
+    expect(errorOf(events)).toBeUndefined()
+  })
+
+  it('does not cut Think off once it has started answering', async () => {
+    const { p, mock } = await setup({ thinking: ['hmm'], tokens: Array(20).fill('x'), delayMs: 20 }, { thinkMaxMs: 100 })
+    await p.ask(ask({ think: true }))
+    expect(mock.chatBodies().filter((b) => b.messages.length)).toHaveLength(1)
+  })
+
   it('searches plain questions as typed, news questions in the news', async () => {
     const filters: unknown[] = []
     const { p, mock, searches } = await setup({}, {

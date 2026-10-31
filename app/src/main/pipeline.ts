@@ -31,6 +31,8 @@ export interface PipelineDeps {
   ollama: (baseUrl: string, apiKey: string) => OllamaClient
   search: typeof runSearch
   emit: (e: AskEvent) => void
+  /** For tests: how long Think may reason before falling back (default THINK_MAX_MS). */
+  thinkMaxMs?: number
   /** Saves a finished turn to chat history (skipped when history is off). */
   record?: (conversationId: string, createdAt: number, turn: StoredTurn) => void
 }
@@ -48,7 +50,9 @@ export const SAMPLING = {
   thinking: { temperature: 0.6, topP: 0.95, topK: 20, presencePenalty: 1.0 }
 } as const
 /** Pages read in full per mode when searching (capped by the setting): Fast reads none. */
-export const PAGES_BY_MODE = { fast: 0, accurate: 1, think: 2 } as const
+export const PAGES_BY_MODE = { fast: 0, accurate: 1, think: 1 } as const
+/** Longest Think may reason without starting its answer before Lenz answers with Accurate instead. */
+export const THINK_MAX_MS = 30_000
 export const QUERY_MAX_TOKENS = 30
 export const PING_TIMEOUT_MS = 3000
 export const LOADING_HINT_MS = 1500
@@ -363,11 +367,22 @@ export function createPipeline(deps: PipelineDeps) {
       const messages = buildMessages({ screen, history, question, search })
       let answer = ''
       let truncated = false
+      let overThinking = false
       const stream = async (m: string, think: boolean): Promise<void> => {
         emit({ type: 'status', text: 'Thinking…' })
         const loadingHint = setTimeout(() => emit({ type: 'status', text: 'Loading model…' }), LOADING_HINT_MS)
         let thinking = false
         truncated = false
+        // Think gets THINK_MAX_MS to start answering; after that it's cut off (see below).
+        const cap = new AbortController()
+        const capTimer = think
+          ? setTimeout(() => {
+              if (!answer) {
+                overThinking = true
+                cap.abort()
+              }
+            }, deps.thinkMaxMs ?? THINK_MAX_MS)
+          : undefined
         try {
           for await (const c of client.chat(
             {
@@ -378,7 +393,7 @@ export function createPipeline(deps: PipelineDeps) {
               numCtx: NUM_CTX,
               ...(think ? SAMPLING.thinking : SAMPLING.instruct)
             },
-            ac.signal
+            AbortSignal.any([ac.signal, cap.signal])
           )) {
             clearTimeout(loadingHint)
             check()
@@ -396,12 +411,13 @@ export function createPipeline(deps: PipelineDeps) {
           }
         } finally {
           clearTimeout(loadingHint)
+          clearTimeout(capTimer)
           if (thinking) emit({ type: 'thinking', active: false })
         }
       }
       await stream(model, req.think)
-      // Think used its whole budget without answering: answer with Accurate instead.
-      if (req.think && truncated && !answer) {
+      // Think ran out of time or room without answering: answer with Accurate instead.
+      if (req.think && !answer && (truncated || overThinking)) {
         check()
         emit({ type: 'notice', text: 'Thinking ran too long — answering with Accurate instead.' })
         timing.model = s.models.accurate
