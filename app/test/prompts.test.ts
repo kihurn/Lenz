@@ -68,7 +68,7 @@ describe('prompts', () => {
   it('truncates OCR text to 6000 chars', () => {
     expect(MAX_OCR_CHARS).toBe(6000)
     const last = buildMessages({ screen: { mode: 'text', ocrText: 'a'.repeat(9000) }, history: [], question: 'q' }).at(-1)!
-    expect(last.content.match(/a+/)![0].length).toBe(6000)
+    expect(last.content.match(/a{100,}/)![0].length).toBe(6000)
   })
 
   it('wraps search content as untrusted', () => {
@@ -121,5 +121,12 @@ describe('recentHistory', () => {
   it('drops older turns past the character budget and never starts on an answer', () => {
     const kept = recentHistory(turns(6, 2500))
     expect(kept.map((t) => t.text[0])).toEqual(['4', '5'])
+  })
+})
+
+describe('today', () => {
+  it('every question starts with the date', () => {
+    const last = buildMessages({ history: [], question: 'q', now: new Date(2026, 9, 31) }).at(-1)!
+    expect(last.content).toBe('(Today is Saturday, 31 October 2026.)\n\nq')
   })
 })

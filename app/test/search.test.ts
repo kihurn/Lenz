@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { fetchPageText, looksLikeQuery, PAGE_TEXT_MAX_CHARS, pingSearxng, runSearch, searchSearxng } from '../src/main/search'
+import { fetchPageText, looksLikeQuery, PAGE_TEXT_MAX_CHARS, pingSearxng, recencyFilter, runSearch, searchSearxng } from '../src/main/search'
 
 const article = readFileSync(join(__dirname, 'fixtures/article.html'), 'utf8')
 const servers: Server[] = []
@@ -191,5 +191,42 @@ describe('pingSearxng', () => {
     const t0 = Date.now()
     await expect(pingSearxng(base, 3000)).rejects.toThrow()
     expect(Date.now() - t0).toBeLessThan(3500)
+  })
+})
+
+describe('recencyFilter', () => {
+  it.each([
+    ['top news headlines today', { category: 'news', timeRange: 'day' }],
+    ['who won the most recent F1 race', { category: 'news', timeRange: 'month' }],
+    ['latest iPhone price', { category: 'news', timeRange: 'month' }],
+    ['what is photosynthesis', undefined]
+  ])('%s', (q, want) => {
+    expect(recencyFilter(q)).toEqual(want)
+  })
+})
+
+describe('news search', () => {
+  it('asks SearXNG for recent news, then falls back to a normal search if empty', async () => {
+    const urls: string[] = []
+    const fake = (async (u: string) => {
+      urls.push(String(u))
+      const results = String(u).includes('categories=news') ? [] : [{ title: 'T', url: 'https://x.example', content: 'c' }]
+      return new Response(JSON.stringify({ results }))
+    }) as unknown as typeof fetch
+    const r = await runSearch({
+      baseUrl: 'http://s',
+      query: 'latest news',
+      cfg: { results: 5, pagesToRead: 2, pageTimeoutMs: 1000, budgetMs: 3000 },
+      signal: new AbortController().signal,
+      onStatus: () => {},
+      fetchImpl: fake,
+      pagesToRead: 0,
+      filter: { category: 'news', timeRange: 'day' }
+    })
+    expect(urls[0]).toContain('categories=news')
+    expect(urls[0]).toContain('time_range=day')
+    expect(urls[1]).not.toContain('categories')
+    expect(urls).toHaveLength(2) // no pages read with pagesToRead: 0
+    expect(r.sources).toHaveLength(1)
   })
 })

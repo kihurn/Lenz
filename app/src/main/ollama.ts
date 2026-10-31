@@ -14,6 +14,9 @@ export interface ChatRequest {
   numPredict: number
   numCtx: number
   temperature: number
+  topP?: number
+  topK?: number
+  presencePenalty?: number
 }
 
 export type ChatChunk =
@@ -150,7 +153,14 @@ export function createOllamaClient(baseUrl: string, apiKey = '', fetchImpl: type
             messages: req.messages,
             stream: true,
             think: req.think,
-            options: { temperature: req.temperature, num_ctx: req.numCtx, num_predict: req.numPredict }
+            options: {
+              temperature: req.temperature,
+              num_ctx: req.numCtx,
+              num_predict: req.numPredict,
+              ...(req.topP !== undefined ? { top_p: req.topP } : {}),
+              ...(req.topK !== undefined ? { top_k: req.topK } : {}),
+              ...(req.presencePenalty !== undefined ? { presence_penalty: req.presencePenalty } : {})
+            }
           }),
           signal: combined
         })

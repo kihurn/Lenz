@@ -69,16 +69,19 @@ describe('pipeline', () => {
     await p.ask(ask())
     const t = types(events).filter((x) => x !== 'status')
     expect(t).toEqual(['capture', 'token', 'token', 'done'])
-    expect(events.find((e) => e.type === 'capture')).toMatchObject({ mode: 'text' })
+    // Accurate sends the picture too, even for a mostly-text screen
+    expect(events.find((e) => e.type === 'capture')).toMatchObject({ mode: 'image' })
     expect(tokens(events)).toBe('ATP')
     expect(events.at(-1)).toMatchObject({ type: 'done', truncated: false })
   })
 
-  it('sends text-only content for dense text and the image for image mode', async () => {
+  it('Fast sends text only for dense text; the image when asked or in Accurate', async () => {
     const { p, mock } = await setup()
-    await p.ask(ask())
+    await p.ask(ask({ speed: 'fast' }))
     expect(mock.lastChatBody().messages.at(-1).images).toBeUndefined()
-    await p.ask(ask({ newCapture: false, modeOverride: 'image' }))
+    await p.ask(ask({ speed: 'fast', newCapture: false, modeOverride: 'image' }))
+    expect(mock.lastChatBody().messages.at(-1).images).toEqual([Buffer.from('png').toString('base64')]) // text-heavy → PNG
+    await p.ask(ask({ newCapture: false }))
     expect(mock.lastChatBody().messages.at(-1).images).toEqual([Buffer.from('png').toString('base64')]) // text-heavy → PNG
   })
 
@@ -107,7 +110,37 @@ describe('pipeline', () => {
     const b = mock.lastChatBody()
     expect(b.model).toBe('qwen3-vl:8b-instruct')
     expect(b.think).toBe(false)
-    expect(b.options).toEqual({ temperature: 0.3, num_ctx: 8192, num_predict: 1536 })
+    expect(b.options).toEqual({ temperature: 0.3, top_p: 0.8, top_k: 20, num_ctx: 8192, num_predict: 1536 })
+  })
+
+  it('Think uses the thinking sampling settings', async () => {
+    const { p, mock } = await setup()
+    await p.ask(ask({ think: true }))
+    expect(mock.lastChatBody().options).toMatchObject({ temperature: 0.6, top_p: 0.95, top_k: 20, presence_penalty: 1 })
+  })
+
+  it('falls back to Accurate when Think runs out of room before answering', async () => {
+    const { p, mock, events } = await setup({ thinking: ['hmm'], tokens: [], doneReason: 'length' })
+    await p.ask(ask({ think: true }))
+    const bodies = mock.chatBodies().filter((b) => b.messages.length)
+    expect(bodies.map((b) => b.model)).toEqual(['qwen3-vl:8b', 'qwen3-vl:8b-instruct'])
+    expect(events.some((e) => e.type === 'notice' && e.text.includes('Thinking ran too long'))).toBe(true)
+    expect((events.at(-1) as Extract<AskEvent, { type: 'done' }>).timing).toMatchObject({ mode: 'Accurate' })
+  })
+
+  it('searches plain questions as typed, news questions in the news', async () => {
+    const filters: unknown[] = []
+    const { p, mock, searches } = await setup({}, {
+      search: (async (a: Parameters<typeof runSearch>[0]) => {
+        searches.push(a.query)
+        filters.push({ filter: a.filter, pages: a.pagesToRead })
+        return { query: a.query, sources: [], pages: [] }
+      }) as typeof runSearch
+    })
+    await p.ask(ask({ question: 'who won the most recent formula 1 grand prix and by how many seconds did they win it', newCapture: false, search: true, speed: 'fast' }))
+    expect(searches).toEqual(['who won the most recent formula 1 grand prix and by how many seconds did they win it'])
+    expect(mock.chatBodies().filter((b) => b.messages.length)).toHaveLength(1) // no query-writing call
+    expect(filters[0]).toEqual({ filter: { category: 'news', timeRange: 'month' }, pages: 0 })
   })
 
   it('uses fast model when speed is fast', async () => {
@@ -217,7 +250,7 @@ describe('pipeline', () => {
     expect(events.some((e) => e.type === 'noscreen')).toBe(true)
     expect(events.some((e) => e.type === 'capture')).toBe(false)
     const last = mock.lastChatBody().messages.at(-1)
-    expect(last.content).toBe('what is photosynthesis?')
+    expect(last.content).toMatch(/^\(Today is \w+, \d+ \w+ \d{4}\.\)\n\nwhat is photosynthesis\?$/)
     expect(last.images).toBeUndefined()
     expect(errorOf(events)).toBeUndefined()
   })

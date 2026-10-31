@@ -1,5 +1,5 @@
 {
-  "_help": "Test questions for `npm run eval`. Add your own: put a screenshot in eval/screens/ and add a case. expect.any = at least one phrase must appear; expect.all = every phrase must appear (case-insensitive); expect.manual = you judge it from the report; expect.today = the answer must contain today's date.",
+  "_help": "Test questions for `npm run eval`. Add your own: put a screenshot in eval/screens/ and add a case. expect.any = at least one phrase must appear; expect.all = every phrase must appear (case-insensitive); expect.manual = you judge it from the report; expect.not = wrong if any of these appear; expect.today = the answer must contain today's date.",
   "cases": [
     { "id": "algebra-q2", "screen": "worksheet-algebra.png", "question": "solve question 2", "expect": { "any": ["x = 9", "x=9", "x \\= 9", "x=\\ 9"] } },
     { "id": "algebra-q4", "screen": "worksheet-algebra.png", "question": "what's the answer to number 4?", "expect": { "any": ["x = 10", "x=10", "x \\= 10"] } },
@@ -13,12 +13,12 @@
     { "id": "diagram-cell", "screen": "diagram-cell.png", "question": "name the parts labelled A, B and C on this diagram", "expect": { "all": ["membrane", "nucle", "mitochondri"] } },
     { "id": "code-bug", "screen": "code-bug.png", "question": "what's wrong with this code?", "expect": { "any": ["colon"] } },
     { "id": "mcq", "screen": "mcq-photosynthesis.png", "question": "what's the answer to this question?", "expect": { "any": ["carbon dioxide", "co2", "co₂", "co_2"] } },
-    { "id": "count-red-circles", "screen": "count-shapes.png", "question": "how many red circles are on this screen?", "expect": { "any": ["6", "six"] } },
+    { "id": "count-red-circles", "screen": "count-shapes.png", "question": "how many red circles are on this screen?", "expect": { "any": ["6 red", "six red", "total: 6", "= 6", "**6**", "are 6", "is 6"], "not": ["5 red", "five red", "7 red", "seven red", "4 red", "= 5", "= 7"] } },
     { "id": "bat-ball", "question": "A bat and a ball cost $1.10 in total. The bat costs $1.00 more than the ball. How much does the ball cost?", "expect": { "any": ["0.05", "5 cents", "five cents", "5¢"] } },
     { "id": "multiply", "question": "What is 17 × 24?", "expect": { "any": ["408"] } },
     { "id": "derivative", "question": "What is the derivative of x^3 sin(x)?", "expect": { "all": ["cos", "3x"] } },
     { "id": "train-time", "question": "A train leaves at 9:40 and arrives at 13:15. How long is the journey?", "expect": { "any": ["3 hours and 35", "3 hours 35", "3 h 35", "3h 35", "215 min"] } },
-    { "id": "strawberry", "question": "How many letter r's are in the word strawberry?", "expect": { "any": ["3", "three"] } },
+    { "id": "strawberry", "question": "How many letter r's are in the word strawberry?", "expect": { "any": ["3 letter", "3 r", "three r", "three letter", "**3**", "total: 3", "answer: 3", "contains 3", "has 3"], "not": ["two", "**2**", "2 letter", "2 r'", "answer: 2"] } },
     { "id": "today", "question": "What is today's date?", "expect": { "today": true } },
     { "id": "news-headlines", "question": "What are the top news headlines today?", "search": true, "expect": { "manual": true } },
     { "id": "news-f1", "question": "Who won the most recent Formula 1 Grand Prix?", "search": true, "expect": { "manual": true } }

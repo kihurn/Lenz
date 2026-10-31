@@ -22,7 +22,7 @@ interface Case {
   screen?: string
   question: string
   search?: boolean
-  expect: { any?: string[]; all?: string[]; manual?: boolean; today?: boolean }
+  expect: { any?: string[]; all?: string[]; not?: string[]; manual?: boolean; today?: boolean }
 }
 type Mode = 'fast' | 'accurate' | 'think'
 const MODE_LABEL: Record<Mode, string> = { fast: 'Fast', accurate: 'Accurate', think: 'Think' }
@@ -76,7 +76,7 @@ const compact = (s: string) =>
   s
     .toLowerCase()
     .replace(/\\(text|mathrm|mathbf|textbf|left|right|quad|,|;|!)/g, ' ')
-    .replace(/[\\${}*_`]/g, '')
+    .replace(/[\\${}*_`&]/g, '')
     .replace(/\s+/g, '')
 
 function todayPhrases(d = new Date()): string[] {
@@ -90,7 +90,9 @@ function todayPhrases(d = new Date()): string[] {
 function grade(c: Case, answer: string): '✓' | '✗' | '?' {
   const a = compact(answer)
   const has = (p: string) => a.includes(compact(p))
+  if (!answer.trim()) return '✗'
   if (c.expect.manual) return '?'
+  if (c.expect.not?.some(has)) return '✗'
   if (c.expect.today) return todayPhrases().some(has) ? '✓' : '✗'
   if (c.expect.all && !c.expect.all.every(has)) return '✗'
   if (c.expect.any && !c.expect.any.some(has)) return '✗'
@@ -197,7 +199,8 @@ async function main(): Promise<void> {
     for (const r of results.filter((x) => x.id === c.id)) {
       const t = r.timing
       const time = t ? `${sec(t.totalMs)}, first words ${sec(t.firstTokenMs ?? NaN)}${t.searchMs !== undefined ? `, search ${sec(t.searchMs)}` : ''}` : ''
-      lines.push(`### ${r.grade} ${MODE_LABEL[r.mode]} — ${time}`, '', r.error ? `Error: ${r.error}` : r.answer, '')
+      const body = r.error ? `Error: ${r.error}` : r.answer.trim() || '_(no answer)_'
+      lines.push(`### ${r.grade} ${MODE_LABEL[r.mode]} — ${time}`, '', body, '')
     }
   }
   writeFileSync(file, lines.join('\n'))

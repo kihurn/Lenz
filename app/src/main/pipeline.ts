@@ -4,7 +4,7 @@ import { needsScreen, wantsFreshLook } from './fresh-look'
 import { OllamaError, type OllamaClient } from './ollama'
 import { decideMode, encodeImage, type ImageOps, type OcrResult } from './prepare'
 import { buildMessages, buildQueryMessages, resolveQuestion, type ScreenContext, type SearchContext, type Turn } from './prompts'
-import { looksLikeQuery, type runSearch } from './search'
+import { looksLikeQuery, recencyFilter, type runSearch } from './search'
 
 export interface CaptureResult {
   png: Buffer
@@ -38,6 +38,17 @@ export interface PipelineDeps {
 // Constant across requests: changing num_ctx makes Ollama reload the model.
 export const NUM_CTX = 8192
 export const TEMPERATURE = 0.3
+/**
+ * Sampling per model kind. Instruct models stay near-deterministic (good for maths and reading);
+ * thinking models reason worse when too rigid (Qwen advises against greedy decoding), and a
+ * presence penalty discourages the endless loops seen in testing.
+ */
+export const SAMPLING = {
+  instruct: { temperature: TEMPERATURE, topP: 0.8, topK: 20 },
+  thinking: { temperature: 0.6, topP: 0.95, topK: 20, presencePenalty: 1.0 }
+} as const
+/** Pages read in full per mode when searching (capped by the setting): Fast reads none. */
+export const PAGES_BY_MODE = { fast: 0, accurate: 1, think: 2 } as const
 export const QUERY_MAX_TOKENS = 30
 export const PING_TIMEOUT_MS = 3000
 export const LOADING_HINT_MS = 1500
@@ -268,7 +279,10 @@ export function createPipeline(deps: PipelineDeps) {
         if (reading) emit({ type: 'status', text: 'Reading screen…' })
         const ocr = await readScreen(st)
         check()
-        const mode = decideMode(ocr, req.modeOverride)
+        // Accurate and Think also get the picture, not just the text read off it: tables,
+        // diagrams and layout survive. Fast stays text-only when the screen is mostly text.
+        const fast = req.speed === 'fast' && !req.think
+        const mode = decideMode(ocr, req.modeOverride ?? (fast ? undefined : 'image'))
         screen = { mode, ocrText: ocr?.text ?? '' }
         if (mode === 'image') {
           screen.imageBase64 = encodeImage(st.capture.png, ocr, s.imageMaxSide, deps.imageOps).base64
@@ -303,8 +317,10 @@ export function createPipeline(deps: PipelineDeps) {
       if (req.search) {
         const tSearch = Date.now()
         try {
-          let query = question
-          if (!looksLikeQuery(question)) {
+          // Plain questions go to the search engine as typed; only screen questions need the
+          // model to write a query (it has to read the screen to know what to search for).
+          let query = question.split(/\s+/).slice(0, 30).join(' ')
+          if (screen && !looksLikeQuery(question)) {
             emit({ type: 'status', text: 'Writing search query…' })
             let raw = ''
             for await (const c of client.chat(
@@ -314,7 +330,7 @@ export function createPipeline(deps: PipelineDeps) {
                 think: false,
                 numPredict: QUERY_MAX_TOKENS,
                 numCtx: NUM_CTX,
-                temperature: TEMPERATURE
+                ...(req.think ? SAMPLING.thinking : SAMPLING.instruct)
               },
               ac.signal
             )) {
@@ -328,7 +344,9 @@ export function createPipeline(deps: PipelineDeps) {
             query,
             cfg: s.search,
             signal: ac.signal,
-            onStatus: (text) => emit({ type: 'status', text })
+            onStatus: (text) => emit({ type: 'status', text }),
+            pagesToRead: PAGES_BY_MODE[req.think ? 'think' : req.speed],
+            filter: recencyFilter(question)
           })
           check()
           sources = search.sources
@@ -342,39 +360,54 @@ export function createPipeline(deps: PipelineDeps) {
       }
 
       // 4. Stream the answer.
-      emit({ type: 'status', text: 'Thinking…' })
-      const loadingHint = setTimeout(() => emit({ type: 'status', text: 'Loading model…' }), LOADING_HINT_MS)
+      const messages = buildMessages({ screen, history, question, search })
       let answer = ''
-      let thinking = false
       let truncated = false
-      try {
-        for await (const c of client.chat(
-          {
-            model,
-            messages: buildMessages({ screen, history, question, search }),
-            think: req.think,
-            numPredict: req.think ? s.maxAnswerTokens + THINK_EXTRA_TOKENS : s.maxAnswerTokens,
-            numCtx: NUM_CTX,
-            temperature: TEMPERATURE
-          },
-          ac.signal
-        )) {
-          clearTimeout(loadingHint)
-          check()
-          if (c.type === 'thinking') {
-            if (!thinking) emit({ type: 'thinking', active: (thinking = true) })
-          } else if (c.type === 'content') {
-            if (thinking) emit({ type: 'thinking', active: (thinking = false) })
-            answer += c.text
-            timing.firstTokenMs ??= Date.now() - t0
-            emittedTokens = true
-            emit({ type: 'token', text: c.text })
-          } else {
-            truncated = c.doneReason === 'length'
+      const stream = async (m: string, think: boolean): Promise<void> => {
+        emit({ type: 'status', text: 'Thinking…' })
+        const loadingHint = setTimeout(() => emit({ type: 'status', text: 'Loading model…' }), LOADING_HINT_MS)
+        let thinking = false
+        truncated = false
+        try {
+          for await (const c of client.chat(
+            {
+              model: m,
+              messages,
+              think,
+              numPredict: think ? s.maxAnswerTokens + THINK_EXTRA_TOKENS : s.maxAnswerTokens,
+              numCtx: NUM_CTX,
+              ...(think ? SAMPLING.thinking : SAMPLING.instruct)
+            },
+            ac.signal
+          )) {
+            clearTimeout(loadingHint)
+            check()
+            if (c.type === 'thinking') {
+              if (!thinking) emit({ type: 'thinking', active: (thinking = true) })
+            } else if (c.type === 'content') {
+              if (thinking) emit({ type: 'thinking', active: (thinking = false) })
+              answer += c.text
+              timing.firstTokenMs ??= Date.now() - t0
+              emittedTokens = true
+              emit({ type: 'token', text: c.text })
+            } else {
+              truncated = c.doneReason === 'length'
+            }
           }
+        } finally {
+          clearTimeout(loadingHint)
+          if (thinking) emit({ type: 'thinking', active: false })
         }
-      } finally {
-        clearTimeout(loadingHint)
+      }
+      await stream(model, req.think)
+      // Think used its whole budget without answering: answer with Accurate instead.
+      if (req.think && truncated && !answer) {
+        check()
+        emit({ type: 'notice', text: 'Thinking ran too long — answering with Accurate instead.' })
+        timing.model = s.models.accurate
+        timing.mode = 'Accurate'
+        lastModel = s.models.accurate
+        await stream(s.models.accurate, false)
       }
       check()
       history.push({ role: 'user', text: question }, { role: 'assistant', text: answer })

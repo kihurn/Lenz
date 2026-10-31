@@ -25,6 +25,25 @@ const isHttp = (u: string) => {
   }
 }
 
+export interface SearchFilter {
+  /** SearXNG category, e.g. 'news'. */
+  category?: 'news'
+  timeRange?: 'day' | 'week' | 'month'
+}
+
+/**
+ * News mode for questions about what's happening now ("latest", "today", "headlines"):
+ * searches news engines limited to recent results, so answers aren't months out of date.
+ */
+export function recencyFilter(question: string): SearchFilter | undefined {
+  const q = question.toLowerCase()
+  if (/\b(today|tonight|this morning|headlines?|breaking|right now)\b/.test(q)) return { category: 'news', timeRange: 'day' }
+  if (/\b(this week|yesterday|latest|newest|most recent|recent(ly)?|just (happened|announced|released)|current(ly)?|news)\b/.test(q)) {
+    return { category: 'news', timeRange: 'month' }
+  }
+  return undefined
+}
+
 const withTimeout = (signal: AbortSignal, ms: number) => AbortSignal.any([signal, AbortSignal.timeout(ms)])
 
 export async function searchSearxng(
@@ -32,9 +51,12 @@ export async function searchSearxng(
   query: string,
   limit: number,
   signal: AbortSignal,
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  filter: SearchFilter = {}
 ): Promise<Source[]> {
   const params = new URLSearchParams({ q: query, format: 'json' })
+  if (filter.category) params.set('categories', filter.category)
+  if (filter.timeRange) params.set('time_range', filter.timeRange)
   const res = await fetchImpl(`${baseUrl.replace(/\/+$/, '')}/search?${params}`, { signal: withTimeout(signal, 5000) })
   if (!res.ok) throw new Error(`SearXNG returned HTTP ${res.status}`)
   const body = (await res.json()) as { results?: { title?: string; url?: string; content?: string }[] }
@@ -101,15 +123,21 @@ export async function runSearch(args: {
   signal: AbortSignal
   onStatus: (s: string) => void
   fetchImpl?: typeof fetch
+  /** Pages to read in full; defaults to cfg.pagesToRead. 0 = result summaries only (fastest). */
+  pagesToRead?: number
+  filter?: SearchFilter
 }): Promise<SearchContext> {
-  const { baseUrl, query, cfg, signal, onStatus, fetchImpl = fetch } = args
+  const { baseUrl, query, cfg, signal, onStatus, fetchImpl = fetch, filter } = args
+  const pagesToRead = Math.min(args.pagesToRead ?? cfg.pagesToRead, cfg.pagesToRead)
   const budget = new AbortController()
   const timer = setTimeout(() => budget.abort(), cfg.budgetMs)
   const sig = AbortSignal.any([signal, budget.signal])
   try {
-    onStatus('Searching…')
-    const sources = await searchSearxng(baseUrl, query, cfg.results, sig, fetchImpl)
-    const toRead = sources.slice(0, cfg.pagesToRead)
+    onStatus(filter?.category === 'news' ? 'Searching the news…' : 'Searching…')
+    let sources = await searchSearxng(baseUrl, query, cfg.results, sig, fetchImpl, filter)
+    // Nothing recent in the news? Fall back to a normal search.
+    if (!sources.length && filter) sources = await searchSearxng(baseUrl, query, cfg.results, sig, fetchImpl)
+    const toRead = sources.slice(0, pagesToRead)
     const pages: { n: number; text: string }[] = []
     if (toRead.length > 0 && !sig.aborted) {
       onStatus(`Reading ${toRead.length} page${toRead.length === 1 ? '' : 's'}…`)
