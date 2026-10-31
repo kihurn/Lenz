@@ -10,7 +10,8 @@
     "test": "vitest run",
     "mock-ollama": "tsx scripts/mock-ollama.ts",
     "build:ocr": "bash scripts/build-ocr.sh",
-    "dist:mac": "bash scripts/build-mac.sh"
+    "dist:mac": "bash scripts/build-mac.sh",
+    "eval": "tsx scripts/eval.ts"
   },
   "license": "UNLICENSED",
   "devDependencies": {
