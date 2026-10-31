@@ -212,6 +212,11 @@ function registerIpc(): void {
     if (fromPanel(e)) historyStore.clear()
   })
   ipcMain.on(IPC.newChat, (e) => fromPanel(e) && pipeline.reset())
+  ipcMain.on(IPC.warm, (e, raw) => {
+    if (!fromPanel(e) || typeof raw !== 'object' || raw === null) return
+    const { speed, think } = raw as { speed?: unknown; think?: unknown }
+    if ((speed === 'fast' || speed === 'accurate') && typeof think === 'boolean') pipeline.warm({ speed, think })
+  })
   ipcMain.handle(IPC.testConnection, (e, s, typedKey) =>
     fromPanel(e) ? testConnection(s, typedKey) : Promise.reject(new Error('Not allowed.'))
   )

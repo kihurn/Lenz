@@ -71,7 +71,7 @@ describe('pipeline', () => {
     expect(t).toEqual(['capture', 'token', 'token', 'done'])
     expect(events.find((e) => e.type === 'capture')).toMatchObject({ mode: 'text' })
     expect(tokens(events)).toBe('ATP')
-    expect(events.at(-1)).toEqual({ type: 'done', truncated: false })
+    expect(events.at(-1)).toMatchObject({ type: 'done', truncated: false })
   })
 
   it('sends text-only content for dense text and the image for image mode', async () => {
@@ -251,6 +251,25 @@ describe('pipeline', () => {
     expect(captures()).toBe(0)
   })
 
+  it('reports how long the answer took', async () => {
+    const { p, events } = await setup()
+    await p.ask(ask({ search: true }))
+    const done = events.find((e) => e.type === 'done') as Extract<AskEvent, { type: 'done' }>
+    expect(done.timing).toMatchObject({ model: 'qwen3-vl:8b-instruct', mode: 'Accurate' })
+    const t = done.timing!
+    expect(t.totalMs).toBeGreaterThanOrEqual(t.firstTokenMs!)
+    expect(t.screenMs).toBeGreaterThanOrEqual(0)
+    expect(t.searchMs).toBeGreaterThanOrEqual(0)
+  })
+
+  it('warm-up loads the model the toggles will use, once a minute at most', async () => {
+    const { p, mock } = await setup()
+    p.warm({ speed: 'accurate', think: true })
+    p.warm({ speed: 'fast', think: true })
+    await new Promise((r) => setTimeout(r, 100))
+    expect(mock.chatBodies()).toEqual([{ model: 'qwen3-vl:8b', messages: [] }])
+  })
+
   it('sends the saved C0RE key', async () => {
     const { p, events, mock } = await setup({ requireKey: 'c0re_test' })
     await p.ask(ask())
@@ -376,7 +395,7 @@ describe('pipeline', () => {
   it('marks truncated answers', async () => {
     const { p, events } = await setup({ doneReason: 'length' })
     await p.ask(ask())
-    expect(events.at(-1)).toEqual({ type: 'done', truncated: true })
+    expect(events.at(-1)).toMatchObject({ type: 'done', truncated: true })
   })
 
   it('shows Loading model status when first chunk is slow', async () => {

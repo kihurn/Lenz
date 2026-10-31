@@ -19,6 +19,7 @@ const api: LenzApi = {
   historyDelete: (id) => ipcRenderer.invoke(IPC.historyDelete, id),
   historyClear: () => ipcRenderer.invoke(IPC.historyClear),
   newChat: () => ipcRenderer.send(IPC.newChat),
+  warm: (prefs) => ipcRenderer.send(IPC.warm, prefs),
   openExternal: (url) => ipcRenderer.send(IPC.openExternal, url),
   openScreenSettings: () => ipcRenderer.send(IPC.openScreenSettings),
   hidePanel: () => ipcRenderer.send(IPC.hidePanel)

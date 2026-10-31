@@ -1,4 +1,4 @@
-import type { AskEvent, AskRequest, ConnectionReport, Conversation, ConversationSummary, SaveResult, Settings } from './types'
+import type { AskEvent, AskRequest, ConnectionReport, Conversation, ConversationSummary, SaveResult, Settings, Speed } from './types'
 
 export const IPC = {
   ask: 'lenz:ask',
@@ -12,6 +12,7 @@ export const IPC = {
   historyDelete: 'lenz:history-delete',
   historyClear: 'lenz:history-clear',
   newChat: 'lenz:new-chat',
+  warm: 'lenz:warm',
   testConnection: 'lenz:test-connection',
   openExternal: 'lenz:open-external',
   openScreenSettings: 'lenz:open-screen-settings',
@@ -40,6 +41,8 @@ export interface LenzApi {
   historyClear(): Promise<void>
   /** Forgets the current conversation and screenshot. */
   newChat(): void
+  /** Loads the model these toggles will use, so the next answer starts quickly. */
+  warm(prefs: { speed: Speed; think: boolean }): void
   openExternal(url: string): void
   openScreenSettings(): void
   hidePanel(): void

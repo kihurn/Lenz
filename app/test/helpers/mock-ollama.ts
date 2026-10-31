@@ -76,6 +76,10 @@ export async function startMockOllama(opts: MockOllamaOptions = {}): Promise<Moc
       const parsed = JSON.parse(body)
       bodies.push(parsed)
       if (opts.missingModel) return json(404, { error: `model '${parsed.model}' not found` })
+      // An empty chat just loads the model (Ollama's warm-up).
+      if (Array.isArray(parsed.messages) && parsed.messages.length === 0) {
+        return json(200, { model: parsed.model, done: true, done_reason: 'load' })
+      }
       res.writeHead(200, { 'content-type': 'application/x-ndjson' })
       const send = async (obj: unknown) => {
         if (opts.delayMs) await sleep(opts.delayMs)

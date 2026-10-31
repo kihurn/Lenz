@@ -206,7 +206,12 @@ export function createOllamaClient(baseUrl: string, apiKey = '', fetchImpl: type
     }
   }
 
-  return { ping, listModels, chat }
+  /** Asks Ollama to load `model` now (an empty chat loads it), so the next answer starts fast. */
+  async function warm(model: string, timeoutMs = 120_000): Promise<void> {
+    await getJson('/api/chat', { method: 'POST', body: JSON.stringify({ model, messages: [] }) }, timeoutMs)
+  }
+
+  return { ping, listModels, chat, warm }
 }
 
 export type OllamaClient = ReturnType<typeof createOllamaClient>

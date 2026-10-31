@@ -1,6 +1,6 @@
 import 'katex/dist/katex.min.css'
 import './styles.css'
-import { turnLabel, type AskEvent, type AskRequest, type Conversation, type ErrorCode, type InputMode, type Settings, type Source, type Speed } from '../shared/types'
+import { turnLabel, type Timing, type AskEvent, type AskRequest, type Conversation, type ErrorCode, type InputMode, type Settings, type Source, type Speed } from '../shared/types'
 import { renderHistory } from './history-view'
 import { renderMarkdown } from './markdown'
 import { renderSettings } from './settings-view'
@@ -68,6 +68,9 @@ let turn: TurnView | null = null
 
 // ---------- header toggles ----------
 
+/** Warm up the model the current toggles will use. */
+const warm = () => window.lenz.warm({ speed: prefs.speed, think: prefs.think })
+
 function syncToggles(): void {
   for (const b of document.querySelectorAll<HTMLButtonElement>('[data-speed]')) {
     b.setAttribute('aria-pressed', String(b.dataset['speed'] === prefs.speed))
@@ -84,12 +87,14 @@ for (const b of document.querySelectorAll<HTMLButtonElement>('[data-speed]')) {
     prefs.speed = b.dataset['speed'] as Speed
     savePrefs()
     syncToggles()
+    warm()
   })
 }
 el.think.addEventListener('click', () => {
   prefs.think = !prefs.think
   savePrefs()
   syncToggles()
+  warm()
 })
 el.search.addEventListener('click', () => {
   prefs.search = !prefs.search
@@ -192,6 +197,26 @@ function markNewLook(thumb: string): void {
   else el.thread.append(mark)
 }
 
+const secs = (ms: number) => `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`
+
+/** "2.4 s · first words 0.8 s · Accurate · search 0.9 s" */
+function timingText(t: Timing): string {
+  const parts = [secs(t.totalMs)]
+  if (t.firstTokenMs !== undefined) parts.push(`first words ${secs(t.firstTokenMs)}`)
+  parts.push(t.mode)
+  if (t.screenMs !== undefined) parts.push(`screen ${secs(t.screenMs)}`)
+  if (t.searchMs !== undefined) parts.push(`search ${secs(t.searchMs)}`)
+  return parts.join(' · ')
+}
+
+function showTiming(t: TurnView, timing: Timing): void {
+  const p = document.createElement('p')
+  p.className = 'timing'
+  p.textContent = timingText(timing)
+  p.title = timing.model
+  t.root.append(p)
+}
+
 function note(t: TurnView, text: string): void {
   const p = document.createElement('p')
   p.className = 'note'
@@ -292,6 +317,7 @@ function onEvent(e: AskEvent): void {
       if (turn) {
         scheduleRender(turn, true)
         turn.status.textContent = ''
+        if (e.timing) showTiming(turn, e.timing)
         if (e.truncated) {
           note(
             turn,
@@ -406,6 +432,7 @@ document.addEventListener('keydown', (e) => {
 // The panel "materialises" each time it's shown.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return
+  warm()
   el.shell.classList.remove('appear')
   void el.shell.offsetWidth
   el.shell.classList.add('appear')
@@ -461,6 +488,7 @@ async function openConversation(id: string): Promise<void> {
     v.answer.classList.remove('streaming')
     v.answer.innerHTML = renderMarkdown(t.answer)
     if (t.sources) renderSources(v, t.sources)
+    if (t.timing) showTiming(v, t.timing)
   }
   turn = null
   showNoScreen('Saved chat · Lenz looks at your screen only when needed')
@@ -508,4 +536,5 @@ void window.lenz.getSettings().then((s) => {
   settings = s
   applySettings()
   syncToggles()
+  warm()
 })

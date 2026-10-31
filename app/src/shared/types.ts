@@ -54,7 +54,7 @@ export type AskEvent =
   | { type: 'token'; text: string }
   | { type: 'sources'; sources: Source[] }
   | { type: 'notice'; text: string }
-  | { type: 'done'; truncated: boolean }
+  | { type: 'done'; truncated: boolean; timing?: Timing }
   | { type: 'error'; code: ErrorCode; message: string; partial: boolean }
 
 export interface Settings {
@@ -85,6 +85,19 @@ export interface ConnectionReport {
   searxng: { ok: boolean; error?: string }
 }
 
+/** How long an answer took, shown under it. All times in ms from pressing Ask. */
+export interface Timing {
+  totalMs: number
+  /** When the first word of the answer appeared. */
+  firstTokenMs?: number
+  /** Screenshot + reading the screen. */
+  screenMs?: number
+  /** Web search + reading pages. */
+  searchMs?: number
+  model: string
+  mode: 'Fast' | 'Accurate' | 'Think'
+}
+
 export interface StoredTurn {
   /** What the panel showed as the question, e.g. "Explain · what is ATP?". */
   label: string
@@ -94,6 +107,7 @@ export interface StoredTurn {
   sources?: Source[]
   /** Set on the turn that used a new screenshot. */
   thumbnailDataUrl?: string
+  timing?: Timing
   at: number
 }
 

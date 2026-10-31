@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { turnLabel, type AskEvent, type AskRequest, type Conversation, type ErrorCode, type Settings, type Source, type StoredTurn } from '../shared/types'
+import { turnLabel, type AskEvent, type AskRequest, type Conversation, type ErrorCode, type Settings, type Source, type StoredTurn, type Timing } from '../shared/types'
 import { needsScreen, wantsFreshLook } from './fresh-look'
 import { OllamaError, type OllamaClient } from './ollama'
 import { decideMode, encodeImage, type ImageOps, type OcrResult } from './prepare'
@@ -43,6 +43,8 @@ export const PING_TIMEOUT_MS = 3000
 export const LOADING_HINT_MS = 1500
 /** Extra room for the thinking model's reasoning, which counts against the length limit. */
 export const THINK_EXTRA_TOKENS = 3072
+/** Don't re-send a warm-up for the same model more often than this. */
+export const WARM_EVERY_MS = 60_000
 export const MODEL_SWITCH_NOTICE = 'Switching model — the first answer takes a few extra seconds while it loads.'
 
 /** Think uses the thinking model; otherwise Fast or Accurate. */
@@ -227,6 +229,8 @@ export function createPipeline(deps: PipelineDeps) {
     const s = deps.settings()
     const model = pickModel(s, req)
     let emittedTokens = false
+    const t0 = Date.now()
+    const timing: Timing = { totalMs: 0, model, mode: req.think ? 'Think' : req.speed === 'fast' ? 'Fast' : 'Accurate' }
 
     try {
       // 1. Screen: capture (or reuse), OCR, choose text or image.
@@ -247,6 +251,7 @@ export function createPipeline(deps: PipelineDeps) {
         !!req.lookNow ||
         fresh ||
         (!state && (!!req.actionId || needsScreen(req.question, history.length === 0)))
+      const tScreen = Date.now()
       if (look) {
         emit({ type: 'status', text: fresh || req.lookNow ? 'Taking a new look…' : 'Capturing…' })
         const captured = await deps.capture()
@@ -259,7 +264,8 @@ export function createPipeline(deps: PipelineDeps) {
       const st = state
       let screen: ScreenContext | undefined
       if (st) {
-        if (!st.ocr) emit({ type: 'status', text: 'Reading screen…' })
+        const reading = !st.ocr
+        if (reading) emit({ type: 'status', text: 'Reading screen…' })
         const ocr = await readScreen(st)
         check()
         const mode = decideMode(ocr, req.modeOverride)
@@ -271,6 +277,7 @@ export function createPipeline(deps: PipelineDeps) {
           st.announced = true
           emit({ type: 'capture', thumbnailDataUrl: st.capture.thumbnailDataUrl, mode, ...(st.fresh ? { fresh: true } : {}) })
         }
+        if (look || reading) timing.screenMs = Date.now() - tScreen
       } else {
         emit({ type: 'noscreen' })
       }
@@ -294,6 +301,7 @@ export function createPipeline(deps: PipelineDeps) {
       let search: SearchContext | undefined
       let sources: Source[] | undefined
       if (req.search) {
+        const tSearch = Date.now()
         try {
           let query = question
           if (!looksLikeQuery(question)) {
@@ -324,6 +332,7 @@ export function createPipeline(deps: PipelineDeps) {
           })
           check()
           sources = search.sources
+          timing.searchMs = Date.now() - tSearch
           emit({ type: 'sources', sources: search.sources })
         } catch (e) {
           check()
@@ -357,6 +366,7 @@ export function createPipeline(deps: PipelineDeps) {
           } else if (c.type === 'content') {
             if (thinking) emit({ type: 'thinking', active: (thinking = false) })
             answer += c.text
+            timing.firstTokenMs ??= Date.now() - t0
             emittedTokens = true
             emit({ type: 'token', text: c.text })
           } else {
@@ -368,11 +378,12 @@ export function createPipeline(deps: PipelineDeps) {
       }
       check()
       history.push({ role: 'user', text: question }, { role: 'assistant', text: answer })
-      emit({ type: 'done', truncated })
+      timing.totalMs = Date.now() - t0
+      emit({ type: 'done', truncated, timing })
       if (deps.record && s.saveHistory) {
         conv ??= { id: randomUUID(), createdAt: Date.now() }
         const action = req.actionId ? s.quickActions.find((a) => a.id === req.actionId) : undefined
-        const turn: StoredTurn = { label: turnLabel(req.question, action?.label), question, answer, at: Date.now() }
+        const turn: StoredTurn = { label: turnLabel(req.question, action?.label), question, answer, timing, at: Date.now() }
         if (sources?.length) turn.sources = sources
         if (st && recordedCapture !== st) turn.thumbnailDataUrl = st.capture.thumbnailDataUrl
         recordedCapture = st
@@ -391,7 +402,24 @@ export function createPipeline(deps: PipelineDeps) {
     }
   }
 
-  return { ask, stop, captureNow, setCapture, reset, resume }
+  let lastWarm = { model: '', at: 0 }
+  /** Loads the model the next answer will use, in the background; errors are ignored. */
+  function warm(req: Pick<AskRequest, 'speed' | 'think'>): void {
+    const s = deps.settings()
+    const model = pickModel(s, req)
+    if (model === lastWarm.model && Date.now() - lastWarm.at < WARM_EVERY_MS) return
+    lastWarm = { model, at: Date.now() }
+    deps
+      .ollama(s.serverUrl, deps.apiKey())
+      .warm(model)
+      .then(() => {
+        // The PC has it loaded now, so the "switching model" note isn't needed for it.
+        lastModel = model
+      })
+      .catch(() => (lastWarm = { model: '', at: 0 }))
+  }
+
+  return { ask, stop, captureNow, setCapture, reset, resume, warm }
 }
 
 export type Pipeline = ReturnType<typeof createPipeline>
