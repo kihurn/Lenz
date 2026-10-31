@@ -173,7 +173,10 @@ function registerIpc(): void {
     let key: string | null = null
     if (typeof typedKey === 'string' && typedKey.trim()) {
       const c = checkKey(typedKey)
-      if (!c.ok) return { ok: false, errors: [c.error] }
+      if (!c.ok) {
+        console.warn('[lenz] key not saved:', c.error)
+        return { ok: false, errors: [c.error] }
+      }
       key = c.key
     }
     const result = saveSettings(settingsFile(), s)
@@ -181,9 +184,11 @@ function registerIpc(): void {
       try {
         keyStore.set(key)
       } catch (e) {
+        console.warn('[lenz] key not saved:', e)
         return { ok: false, errors: [`C0RE key: ${String((e as Error)?.message ?? e)}`] }
       }
     }
+    if (!result.ok) console.warn('[lenz] settings not saved:', result.errors)
     if (result.ok) {
       settings = loadSettings(settingsFile())
       registerHotkeys()

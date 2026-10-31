@@ -56,7 +56,10 @@ describe('checkKey', () => {
   it('accepts and trims a C0RE key', () => {
     expect(checkKey('  c0re_abc123 \n')).toEqual({ ok: true, key: 'c0re_abc123' })
   })
-  it.each(['', 'abc', 'c0re_', 'c0re_a b', 'sk-123'])('rejects %j', (k) => {
+  it('accepts keys in other formats (C0RE decides)', () => {
+    expect(checkKey('C0RE-ABCDEF123').ok).toBe(true)
+  })
+  it.each(['', 'abc', 'c0re_', 'c0re_a b c', 'sk-123'])('rejects %j', (k) => {
     expect(checkKey(k).ok).toBe(false)
   })
 })

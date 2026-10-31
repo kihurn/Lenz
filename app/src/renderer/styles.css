@@ -474,6 +474,13 @@ kbd {
 .report .bad {
   color: var(--danger);
 }
+.key-status {
+  font-size: 12px;
+  margin: -4px 0 0;
+}
+.key-status.bad {
+  color: var(--danger);
+}
 .errors {
   color: var(--danger);
   font-size: 12px;

@@ -12,7 +12,7 @@ export function renderSettings(
   root: HTMLElement,
   s: Settings,
   hasKey: boolean,
-  onClose: (saved: Settings | null) => void
+  onClose: (saved: Settings | null, keySaved: boolean) => void
 ): void {
   const keyHint = hasKey ? 'Saved — leave empty to keep it' : 'Paste the key for project “lenz” (starts with c0re_)'
   root.innerHTML = `
@@ -21,6 +21,9 @@ export function renderSettings(
       <legend>Your PC</legend>
       ${field('C0RE address', 'serverUrl', s.serverUrl, 'url')}
       ${field('C0RE key', 'apiKey', '', 'password', `placeholder="${esc(keyHint)}" autocomplete="off" spellcheck="false"`)}
+      <p class="key-status ${hasKey ? 'ok' : 'bad'}" id="key-status">${
+        hasKey ? '✓ A key is saved on this Mac.' : 'No key saved yet — paste it above, then press Save.'
+      }</p>
       ${field('Search engine (SearXNG) address', 'searxngUrl', s.searxngUrl, 'url')}
       <div class="buttons"><button type="button" class="btn" id="test">Test connection</button></div>
       <ul class="report" id="report" hidden></ul>
@@ -103,14 +106,28 @@ export function renderSettings(
   })
 
   const errors = root.querySelector<HTMLUListElement>('#errors')!
-  root.querySelector('#save')!.addEventListener('click', async () => {
-    const next = read()
-    const r = await window.lenz.saveSettings(next, val('apiKey'))
-    if (r.ok) return onClose(await window.lenz.getSettings())
+  const saveBtn = root.querySelector<HTMLButtonElement>('#save')!
+  const showErrors = (list: string[]) => {
     errors.hidden = false
-    errors.innerHTML = r.errors.map((e) => `<li>${esc(e)}</li>`).join('')
+    errors.innerHTML = list.map((e) => `<li>${esc(e)}</li>`).join('')
+    errors.scrollIntoView({ block: 'center' })
+  }
+  saveBtn.addEventListener('click', async () => {
+    saveBtn.disabled = true
+    saveBtn.textContent = 'Saving…'
+    try {
+      const typedKey = val('apiKey')
+      const r = await window.lenz.saveSettings(read(), typedKey)
+      if (r.ok) return onClose(await window.lenz.getSettings(), typedKey.trim() !== '')
+      showErrors(r.errors)
+    } catch (e) {
+      showErrors([`Couldn't save: ${String((e as Error)?.message ?? e)}`])
+    } finally {
+      saveBtn.disabled = false
+      saveBtn.textContent = 'Save'
+    }
   })
-  root.querySelector('#cancel')!.addEventListener('click', () => onClose(null))
+  root.querySelector('#cancel')!.addEventListener('click', () => onClose(null, false))
 }
 
 function showReport(el: HTMLElement, r: ConnectionReport): void {

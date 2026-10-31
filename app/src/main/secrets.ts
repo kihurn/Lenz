@@ -9,11 +9,11 @@ export interface Cipher {
 
 export type KeyCheck = { ok: true; key: string } | { ok: false; error: string }
 
-/** Trims a pasted key and checks it looks like a C0RE key. */
+/** Trims a pasted key and checks it is plausible; C0RE itself decides if it's right. */
 export function checkKey(raw: string): KeyCheck {
   const key = raw.trim()
-  if (!/^c0re_\S+$/.test(key) || key.length > 512) {
-    return { ok: false, error: 'C0RE key: should start with c0re_ (copy it from the C0RE dashboard → Keys).' }
+  if (key.length < 8 || key.length > 512 || /\s/.test(key)) {
+    return { ok: false, error: 'C0RE key: that doesn’t look like a whole key. Copy it again from the C0RE dashboard → Keys.' }
   }
   return { ok: true, key }
 }

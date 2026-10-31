@@ -343,7 +343,7 @@ el.thread.addEventListener('click', (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return
-  if (!el.settings.hidden) closeSettings(null)
+  if (!el.settings.hidden) closeSettings(null, false)
   else window.lenz.hidePanel()
 })
 
@@ -356,10 +356,12 @@ async function openSettings(): Promise<void> {
   renderSettings(el.settings, current, hasKey, closeSettings)
 }
 
-function closeSettings(saved: Settings | null): void {
+function closeSettings(saved: Settings | null, keySaved: boolean): void {
   if (saved) {
     settings = saved
     applySettings()
+    el.notice.textContent = keySaved ? 'Settings and C0RE key saved.' : 'Settings saved.'
+    el.notice.hidden = false
   }
   el.settings.hidden = true
   el.settings.replaceChildren()
