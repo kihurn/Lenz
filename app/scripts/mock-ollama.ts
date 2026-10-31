@@ -1,5 +1,5 @@
 // Fake Ollama server for trying the Lenz UI before the PC is set up.
-// Usage: npm run mock-ollama   (then set the server address to http://127.0.0.1:11434)
+// Usage: npm run mock-ollama   (then set the C0RE address to http://127.0.0.1:11434; no key needed)
 import { startMockOllama } from '../test/helpers/mock-ollama'
 
 const answer =

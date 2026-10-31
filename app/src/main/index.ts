@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { app, globalShortcut, ipcMain, shell, type BrowserWindow } from 'electron'
+import { app, globalShortcut, ipcMain, safeStorage, shell, type BrowserWindow } from 'electron'
 import { IPC } from '../shared/ipc'
 import type { AskEvent, ConnectionReport, Settings } from '../shared/types'
 import { captureDisplayUnderCursor, cropCapture } from './capture'
@@ -7,9 +7,10 @@ import { captureErrorEvent, captureThenShow } from './hotkey-flow'
 import { isSafeExternalUrl, parseAskRequest } from './guards'
 import { nativeImageOps } from './native-image-ops'
 import { ocrHelperPath, runOcr } from './ocr'
-import { createOllamaClient } from './ollama'
+import { createOllamaClient, OllamaError } from './ollama'
 import { openScreenRecordingSettings } from './permissions'
 import { createPipeline } from './pipeline'
+import { checkKey, createKeyStore } from './secrets'
 import { pingSearxng, runSearch } from './search'
 import { loadSettings, saveSettings, SettingsSchema } from './settings'
 import { createPanel, selectRegion } from './windows'
@@ -17,6 +18,8 @@ import { createPanel, selectRegion } from './windows'
 let panel: BrowserWindow
 let settings: Settings
 const settingsFile = () => join(app.getPath('userData'), 'settings.json')
+let keyStore: ReturnType<typeof createKeyStore>
+const apiKey = () => keyStore?.get() ?? ''
 
 function emit(e: AskEvent): void {
   if (!panel.isDestroyed()) panel.webContents.send(IPC.event, e)
@@ -32,7 +35,8 @@ const pipeline = createPipeline({
   capture: async () => (await captureDisplayUnderCursor(panel)).capture,
   ocr: (png) => runOcr(png, ocrHelperPath(app.isPackaged, process.resourcesPath, app.getAppPath())),
   imageOps: nativeImageOps(),
-  ollama: createOllamaClient,
+  apiKey,
+  ollama: (url, key) => createOllamaClient(url, key),
   search: runSearch,
   emit
 })
@@ -92,19 +96,28 @@ function registerHotkeys(): void {
   }
 }
 
-async function testConnection(input: unknown): Promise<ConnectionReport> {
+/** A typed-in key if there is one, otherwise the saved key. */
+function keyToUse(typed: unknown): string {
+  if (typeof typed === 'string' && typed.trim()) {
+    const c = checkKey(typed)
+    return c.ok ? c.key : typed.trim()
+  }
+  return apiKey()
+}
+
+async function testConnection(input: unknown, typedKey: unknown): Promise<ConnectionReport> {
   const parsed = SettingsSchema.safeParse(input)
   const s = parsed.success ? parsed.data : settings
-  const report: ConnectionReport = { ollama: { ok: false }, models: [], searxng: { ok: false } }
-  const client = createOllamaClient(s.serverUrl)
+  const report: ConnectionReport = { server: { ok: false }, models: [], searxng: { ok: false } }
+  const client = createOllamaClient(s.serverUrl, keyToUse(typedKey))
   await Promise.all([
     (async () => {
       try {
-        const { version, latencyMs } = await client.ping()
-        report.ollama = { ok: true, version, latencyMs }
+        const { latencyMs } = await client.ping()
+        report.server = { ok: true, latencyMs }
         report.models = (await client.listModels()).filter((m) => m.vision)
       } catch (e) {
-        report.ollama = { ok: false, error: String((e as Error)?.message ?? e) }
+        report.server = { ok: false, error: connectionError(e) }
       }
     })(),
     (async () => {
@@ -117,6 +130,26 @@ async function testConnection(input: unknown): Promise<ConnectionReport> {
     })()
   ])
   return report
+}
+
+function connectionError(e: unknown): string {
+  if (e instanceof OllamaError) {
+    switch (e.code) {
+      case 'missing_key':
+        return 'No C0RE key yet — paste it above.'
+      case 'invalid_key':
+        return "C0RE didn't accept the key — copy it again from the C0RE dashboard."
+      case 'key_disabled':
+        return 'The key is switched off in C0RE.'
+      case 'key_not_public':
+        return 'The key only works over Tailscale — use http://kihurn-desktop:7080.'
+      case 'engine_offline':
+        return 'C0RE is up, but Ollama on the PC is offline.'
+      case 'rate_limited':
+        return 'Too many requests — try again in a moment.'
+    }
+  }
+  return `Can't reach C0RE: ${String((e as Error)?.message ?? e)}`
 }
 
 function registerIpc(): void {
@@ -134,15 +167,32 @@ function registerIpc(): void {
     if (fromPanel(e) && typeof url === 'string' && isSafeExternalUrl(url)) void shell.openExternal(url)
   })
   ipcMain.handle(IPC.getSettings, () => settings)
-  ipcMain.handle(IPC.saveSettings, (_e, s) => {
+  ipcMain.handle(IPC.hasKey, (e) => fromPanel(e) && keyStore.has())
+  ipcMain.handle(IPC.saveSettings, (e, s, typedKey) => {
+    if (!fromPanel(e)) return { ok: false, errors: ['Not allowed.'] }
+    let key: string | null = null
+    if (typeof typedKey === 'string' && typedKey.trim()) {
+      const c = checkKey(typedKey)
+      if (!c.ok) return { ok: false, errors: [c.error] }
+      key = c.key
+    }
     const result = saveSettings(settingsFile(), s)
+    if (result.ok && key !== null) {
+      try {
+        keyStore.set(key)
+      } catch (e) {
+        return { ok: false, errors: [`C0RE key: ${String((e as Error)?.message ?? e)}`] }
+      }
+    }
     if (result.ok) {
       settings = loadSettings(settingsFile())
       registerHotkeys()
     }
     return result
   })
-  ipcMain.handle(IPC.testConnection, (_e, s) => testConnection(s))
+  ipcMain.handle(IPC.testConnection, (e, s, typedKey) =>
+    fromPanel(e) ? testConnection(s, typedKey) : Promise.reject(new Error('Not allowed.'))
+  )
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -151,6 +201,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => showPanel())
   void app.whenReady().then(() => {
     settings = loadSettings(settingsFile())
+    keyStore = createKeyStore(join(app.getPath('userData'), 'c0re-key.bin'), safeStorage)
     panel = createPanel()
     // ⌘W hides the panel; only Quit (⌘Q) ends Lenz.
     let quitting = false

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createOllamaClient } from '../src/main/ollama'
-import { CaptureError, createPipeline, type PipelineDeps } from '../src/main/pipeline'
+import { CaptureError, createPipeline, MODEL_SWITCH_NOTICE, type PipelineDeps } from '../src/main/pipeline'
 import type { ImageOps, OcrResult } from '../src/main/prepare'
 import type { runSearch } from '../src/main/search'
 import { DEFAULT_SETTINGS } from '../src/main/settings'
@@ -25,24 +25,26 @@ async function setup(
   over: Partial<PipelineDeps> & { serverUrl?: string } = {}
 ) {
   mock = await startMockOllama(mockOpts)
+  const { serverUrl, ...depsOver } = over
   const events: AskEvent[] = []
   let captures = 0
   const searches: string[] = []
   const deps: PipelineDeps = {
-    settings: () => ({ ...DEFAULT_SETTINGS, serverUrl: over.serverUrl ?? mock!.url }),
+    settings: () => ({ ...DEFAULT_SETTINGS, serverUrl: serverUrl ?? mock!.url }),
+    apiKey: () => 'c0re_test',
     capture: async () => {
       captures++
       return { png: Buffer.from('png'), thumbnailDataUrl: 'data:image/png;base64,cG5n' }
     },
     ocr: async () => denseText,
     imageOps,
-    ollama: (url) => createOllamaClient(url),
+    ollama: (url, key) => createOllamaClient(url, key),
     search: (async (a: Parameters<typeof runSearch>[0]) => {
       searches.push(a.query)
       return { query: a.query, sources: [{ n: 1, title: 'S', url: 'https://s.example', snippet: 'snip' }], pages: [] }
     }) as typeof runSearch,
     emit: (e) => events.push(e),
-    ...over
+    ...depsOver
   }
   const p = createPipeline(deps)
   return { p, events, captures: () => captures, searches, mock: mock! }
@@ -101,17 +103,61 @@ describe('pipeline', () => {
 
   it('uses chat settings from the spec', async () => {
     const { p, mock } = await setup()
-    await p.ask(ask({ think: true }))
+    await p.ask(ask())
     const b = mock.lastChatBody()
-    expect(b.model).toBe('qwen3-vl:8b')
-    expect(b.think).toBe(true)
+    expect(b.model).toBe('qwen3-vl:8b-instruct')
+    expect(b.think).toBe(false)
     expect(b.options).toEqual({ temperature: 0.3, num_ctx: 8192, num_predict: 512 })
   })
 
   it('uses fast model when speed is fast', async () => {
     const { p, mock } = await setup()
     await p.ask(ask({ speed: 'fast' }))
-    expect(mock.lastChatBody().model).toBe('qwen3-vl:4b')
+    expect(mock.lastChatBody().model).toBe('qwen3-vl:4b-instruct')
+  })
+
+  it('Think switches to the thinking model, whatever the speed', async () => {
+    const { p, mock } = await setup()
+    await p.ask(ask({ think: true, speed: 'fast' }))
+    expect(mock.lastChatBody()).toMatchObject({ model: 'qwen3-vl:8b', think: true })
+  })
+
+  it('warns once when switching to or from the thinking model', async () => {
+    const { p, events } = await setup()
+    const notices = () => events.filter((e) => e.type === 'notice').length
+    await p.ask(ask())
+    expect(notices()).toBe(0)
+    await p.ask(ask({ newCapture: false, speed: 'fast' }))
+    expect(notices()).toBe(0) // instruct models fit in VRAM together
+    await p.ask(ask({ newCapture: false, think: true }))
+    expect(notices()).toBe(1)
+    expect(events.find((e) => e.type === 'notice')).toEqual({ type: 'notice', text: MODEL_SWITCH_NOTICE })
+    await p.ask(ask({ newCapture: false, think: true }))
+    expect(notices()).toBe(1)
+    await p.ask(ask({ newCapture: false }))
+    expect(notices()).toBe(2)
+  })
+
+  it('sends the saved C0RE key', async () => {
+    const { p, events, mock } = await setup({ requireKey: 'c0re_test' })
+    await p.ask(ask())
+    expect(errorOf(events)).toBeUndefined()
+    expect(mock.authHeaders().every((h) => h === 'Bearer c0re_test')).toBe(true)
+  })
+
+  it.each([
+    ['missing_key', 401, 'c0re_key', 'Paste it in Settings'],
+    ['invalid_key', 401, 'c0re_key', 'dashboard'],
+    ['key_disabled', 403, 'c0re_key', 'switched off'],
+    ['key_not_public', 403, 'c0re_key', 'Tailscale'],
+    ['model_not_allowed', 403, 'model_not_allowed', "'qwen3-vl:8b-instruct'"],
+    ['rate_limited', 429, 'rate_limited', 'wait a moment'],
+    ['engine_offline', 503, 'engine_offline', 'Ollama']
+  ])('explains C0RE error %s in plain words', async (gwCode, status, code, text) => {
+    const { p, events } = await setup({ gatewayError: { status, code: gwCode, message: 'x' } })
+    await p.ask(ask())
+    expect(errorOf(events)).toMatchObject({ code, partial: false })
+    expect(errorOf(events)!.message).toContain(text)
   })
 
   it('resolves quick actions into the question', async () => {
@@ -144,7 +190,7 @@ describe('pipeline', () => {
     const { p, events } = await setup({ missingModel: true })
     await p.ask(ask())
     expect(errorOf(events)).toMatchObject({ code: 'model_missing' })
-    expect(errorOf(events)!.message).toContain('ollama pull qwen3-vl:8b')
+    expect(errorOf(events)!.message).toContain('ollama pull qwen3-vl:8b-instruct')
   })
 
   it('keeps partial answer on stream error', async () => {

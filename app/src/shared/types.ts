@@ -18,7 +18,11 @@ export interface Source {
 
 export type ErrorCode =
   | 'pc_unreachable'
+  | 'engine_offline'
+  | 'c0re_key'
   | 'model_missing'
+  | 'model_not_allowed'
+  | 'rate_limited'
   | 'permission_screen'
   | 'stream_dropped'
   | 'search_unavailable'
@@ -50,7 +54,7 @@ export type AskEvent =
 export interface Settings {
   serverUrl: string
   searxngUrl: string
-  models: { accurate: string; fast: string }
+  models: { accurate: string; fast: string; thinking: string }
   hotkeys: { capture: string; region: string; toggle: string }
   maxAnswerTokens: number
   imageMaxSide: number
@@ -67,7 +71,8 @@ export interface ModelInfo {
 }
 
 export interface ConnectionReport {
-  ollama: { ok: boolean; version?: string; latencyMs?: number; error?: string }
+  /** C0RE reachable and the key accepted. */
+  server: { ok: boolean; latencyMs?: number; error?: string }
   models: ModelInfo[]
   searxng: { ok: boolean; error?: string }
 }

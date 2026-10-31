@@ -192,8 +192,10 @@ function showError(code: ErrorCode, message: string): void {
     row.append(b)
   }
   if (code === 'permission_screen') action('Open Screen Recording settings', () => window.lenz.openScreenSettings())
-  if (code === 'pc_unreachable' || code === 'model_missing') action('Open Lenz settings', () => void openSettings())
-  if (code !== 'permission_screen' && code !== 'model_missing' && lastRequest) {
+  const fixInSettings: ErrorCode[] = ['pc_unreachable', 'c0re_key', 'model_missing', 'model_not_allowed']
+  const noRetry: ErrorCode[] = ['permission_screen', 'c0re_key', 'model_missing', 'model_not_allowed']
+  if (fixInSettings.includes(code)) action('Open Lenz settings', () => void openSettings())
+  if (!noRetry.includes(code) && lastRequest) {
     action('Retry', () => send({ ...lastRequest!, newCapture: false }, t.root.querySelector('.q')?.textContent ?? ''))
   }
   if (row.childElementCount) box.append(row)
@@ -348,10 +350,10 @@ document.addEventListener('keydown', (e) => {
 // ---------- settings ----------
 
 async function openSettings(): Promise<void> {
-  const current = await window.lenz.getSettings()
+  const [current, hasKey] = await Promise.all([window.lenz.getSettings(), window.lenz.hasKey()])
   el.chat.hidden = true
   el.settings.hidden = false
-  renderSettings(el.settings, current, closeSettings)
+  renderSettings(el.settings, current, hasKey, closeSettings)
 }
 
 function closeSettings(saved: Settings | null): void {

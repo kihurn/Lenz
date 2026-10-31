@@ -11,8 +11,9 @@ const api: LenzApi = {
     return () => ipcRenderer.removeListener(IPC.event, listener)
   },
   getSettings: () => ipcRenderer.invoke(IPC.getSettings),
-  saveSettings: (s) => ipcRenderer.invoke(IPC.saveSettings, s),
-  testConnection: (s) => ipcRenderer.invoke(IPC.testConnection, s),
+  saveSettings: (s, key) => ipcRenderer.invoke(IPC.saveSettings, s, key),
+  hasKey: () => ipcRenderer.invoke(IPC.hasKey),
+  testConnection: (s, key) => ipcRenderer.invoke(IPC.testConnection, s, key),
   openExternal: (url) => ipcRenderer.send(IPC.openExternal, url),
   openScreenSettings: () => ipcRenderer.send(IPC.openScreenSettings),
   hidePanel: () => ipcRenderer.send(IPC.hidePanel)

@@ -11,9 +11,13 @@ beforeEach(() => {
 
 describe('settings', () => {
   it('has the spec defaults', () => {
-    expect(DEFAULT_SETTINGS.serverUrl).toBe('http://study-pc:11434')
-    expect(DEFAULT_SETTINGS.searxngUrl).toBe('http://study-pc:8888')
-    expect(DEFAULT_SETTINGS.models).toEqual({ accurate: 'qwen3-vl:8b', fast: 'qwen3-vl:4b' })
+    expect(DEFAULT_SETTINGS.serverUrl).toBe('http://kihurn-desktop:7080')
+    expect(DEFAULT_SETTINGS.searxngUrl).toBe('http://kihurn-desktop:8888')
+    expect(DEFAULT_SETTINGS.models).toEqual({
+      accurate: 'qwen3-vl:8b-instruct',
+      fast: 'qwen3-vl:4b-instruct',
+      thinking: 'qwen3-vl:8b'
+    })
     expect(DEFAULT_SETTINGS.hotkeys.capture).toBe('CommandOrControl+Shift+Space')
     expect(DEFAULT_SETTINGS.hotkeys.region).toBe('CommandOrControl+Shift+X')
     expect(DEFAULT_SETTINGS.imageMaxSide).toBe(1280)
@@ -34,8 +38,30 @@ describe('settings', () => {
     writeFileSync(file, JSON.stringify({ serverUrl: 'http://100.1.2.3:11434', search: { results: 3 } }))
     const s = loadSettings(file)
     expect(s.serverUrl).toBe('http://100.1.2.3:11434')
-    expect(s.models.accurate).toBe('qwen3-vl:8b')
+    expect(s.models.accurate).toBe('qwen3-vl:8b-instruct')
     expect(s.search).toEqual({ ...DEFAULT_SETTINGS.search, results: 3 })
+  })
+
+  it('moves old pre-C0RE defaults to the new ones', () => {
+    writeFileSync(
+      file,
+      JSON.stringify({
+        serverUrl: 'http://study-pc:11434',
+        searxngUrl: 'http://study-pc:8888',
+        models: { accurate: 'qwen3-vl:8b', fast: 'qwen3-vl:4b' },
+        maxAnswerTokens: 700
+      })
+    )
+    const s = loadSettings(file)
+    expect(s.serverUrl).toBe('http://kihurn-desktop:7080')
+    expect(s.searxngUrl).toBe('http://kihurn-desktop:8888')
+    expect(s.models).toEqual(DEFAULT_SETTINGS.models)
+    expect(s.maxAnswerTokens).toBe(700)
+  })
+
+  it('keeps models the user chose themselves', () => {
+    writeFileSync(file, JSON.stringify({ models: { accurate: 'gemma4:e4b', fast: 'qwen3-vl:4b-instruct' } }))
+    expect(loadSettings(file).models).toEqual({ ...DEFAULT_SETTINGS.models, accurate: 'gemma4:e4b' })
   })
 
   it('falls back to defaults when stored values are invalid', () => {
@@ -55,12 +81,12 @@ describe('settings', () => {
   })
 
   it('strips trailing slash from URLs', () => {
-    expect(saveSettings(file, { ...DEFAULT_SETTINGS, serverUrl: 'http://study-pc:11434/' }).ok).toBe(true)
-    expect(loadSettings(file).serverUrl).toBe('http://study-pc:11434')
+    expect(saveSettings(file, { ...DEFAULT_SETTINGS, serverUrl: 'http://100.94.2.98:7080/' }).ok).toBe(true)
+    expect(loadSettings(file).serverUrl).toBe('http://100.94.2.98:7080')
   })
 
   it('round-trips valid settings', () => {
-    const s = { ...DEFAULT_SETTINGS, models: { accurate: 'gemma4:e4b', fast: 'qwen3-vl:4b' } }
+    const s = { ...DEFAULT_SETTINGS, models: { ...DEFAULT_SETTINGS.models, accurate: 'gemma4:e4b' } }
     expect(saveSettings(file, s)).toEqual({ ok: true })
     expect(JSON.parse(readFileSync(file, 'utf8')).models.accurate).toBe('gemma4:e4b')
     expect(loadSettings(file)).toEqual(s)

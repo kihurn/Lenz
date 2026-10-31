@@ -58,8 +58,11 @@ Try each, and check the label under the thumbnail:
 - [ ] Stop button stops the answer immediately.
 - [ ] A follow-up question remembers the previous answer and the same capture.
 - [ ] Quick actions (Explain, Step-by-step, Summarize, Quiz me, Define) each work.
-- [ ] Think toggle shows "Thinking it through…" before the answer (needs a model that can think).
-- [ ] Fast toggle uses the smaller model (check Ollama's log on the PC, or answer speed).
+- [ ] Think toggle shows "Thinking it through…" before the answer.
+- [ ] Turning Think on shows "Switching model — the first answer takes a few extra seconds…" once;
+      the next question with Think still on doesn't. Turning it off shows the note once more.
+- [ ] Fast toggle uses the smaller model (check the C0RE dashboard's activity, or answer speed).
+      Switching Fast ↔ Accurate shows no "Switching model" note.
 - [ ] Pressing ⌘⇧Space while an answer is streaming stops it, clears the panel and starts fresh
       (Stop button disappears, no leftover "Capturing…" text).
 - [ ] The Auto/Text/Image toggle goes back to Auto after each new capture.
@@ -74,8 +77,13 @@ Try each, and check the label under the thumbnail:
 
 - [ ] PC off (or Tailscale disconnected): "Can't reach your PC…" appears within about 3 seconds.
 - [ ] Wrong model name in Settings: message names the model and the `ollama pull` command.
+- [ ] No key saved: "Lenz needs its C0RE key" with an **Open Lenz settings** button.
+- [ ] Wrong key typed in Settings → Test connection: "C0RE didn't accept the key".
+- [ ] Key set to **off** in the C0RE dashboard: "Lenz's key is switched off in C0RE" (set it back to private after).
+- [ ] After saving the key and reopening Settings, the key box is empty with "Saved — leave empty to keep it",
+      and Lenz still answers after quitting and reopening.
 - [ ] Turn Wi-Fi off mid-answer: the partial answer stays, an error and **Retry** appear.
-- [ ] Settings → Test connection shows Ollama version, latency, vision models and search status.
+- [ ] Settings → Test connection shows "C0RE reachable and key accepted", latency, vision models and search status.
 - [ ] Settings rejects an invalid address (e.g. `file:///`) with a clear message.
 
 ## Speed and memory (against the PC)

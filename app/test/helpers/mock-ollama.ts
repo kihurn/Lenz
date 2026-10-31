@@ -14,6 +14,10 @@ export interface MockOllamaOptions {
   missingModel?: boolean
   /** Accept connections but never respond. */
   hang?: boolean
+  /** Act like C0RE: reject requests without `Authorization: Bearer <requireKey>`. */
+  requireKey?: string
+  /** Answer every request with this C0RE-style error. */
+  gatewayError?: { status: number; code: string; message: string }
   port?: number
 }
 
@@ -22,6 +26,8 @@ export interface MockOllama {
   close(): Promise<void>
   lastChatBody(): any
   chatBodies(): any[]
+  /** Authorization header of every request, in order. */
+  authHeaders(): (string | undefined)[]
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -36,6 +42,7 @@ function readBody(req: IncomingMessage): Promise<string> {
 
 export async function startMockOllama(opts: MockOllamaOptions = {}): Promise<MockOllama> {
   const bodies: any[] = []
+  const auths: (string | undefined)[] = []
   const models = opts.models ?? [
     { name: 'qwen3-vl:8b', vision: true, thinking: true },
     { name: 'qwen3-vl:4b', vision: true, thinking: false },
@@ -49,6 +56,13 @@ export async function startMockOllama(opts: MockOllamaOptions = {}): Promise<Moc
       res.end(JSON.stringify(body))
     }
     const body = req.method === 'POST' ? await readBody(req) : ''
+    auths.push(req.headers.authorization)
+    const gatewayError = (status: number, code: string, message: string) => json(status, { error: { code, message } })
+    if (opts.requireKey !== undefined) {
+      if (!req.headers.authorization) return gatewayError(401, 'missing_key', 'missing API key')
+      if (req.headers.authorization !== `Bearer ${opts.requireKey}`) return gatewayError(401, 'invalid_key', 'invalid API key')
+    }
+    if (opts.gatewayError) return gatewayError(opts.gatewayError.status, opts.gatewayError.code, opts.gatewayError.message)
 
     if (req.url === '/api/version') return json(200, { version: '0.33.1' })
     if (req.url === '/api/tags') return json(200, { models: models.map((m) => ({ name: m.name, model: m.name })) })
@@ -95,6 +109,7 @@ export async function startMockOllama(opts: MockOllamaOptions = {}): Promise<Moc
     url: `http://127.0.0.1:${port}`,
     lastChatBody: () => bodies[bodies.length - 1],
     chatBodies: () => bodies,
+    authHeaders: () => auths,
     close: () =>
       new Promise((r) => {
         server.closeAllConnections()

@@ -8,12 +8,19 @@ function field(label: string, name: string, value: string | number, type = 'text
 }
 
 /** Renders the settings form into `root`. `onClose` returns to the chat view. */
-export function renderSettings(root: HTMLElement, s: Settings, onClose: (saved: Settings | null) => void): void {
+export function renderSettings(
+  root: HTMLElement,
+  s: Settings,
+  hasKey: boolean,
+  onClose: (saved: Settings | null) => void
+): void {
+  const keyHint = hasKey ? 'Saved — leave empty to keep it' : 'Paste the key for project “lenz” (starts with c0re_)'
   root.innerHTML = `
     <h2>Settings</h2>
     <fieldset>
       <legend>Your PC</legend>
-      ${field('Ollama address', 'serverUrl', s.serverUrl, 'url')}
+      ${field('C0RE address', 'serverUrl', s.serverUrl, 'url')}
+      ${field('C0RE key', 'apiKey', '', 'password', `placeholder="${esc(keyHint)}" autocomplete="off" spellcheck="false"`)}
       ${field('Search engine (SearXNG) address', 'searxngUrl', s.searxngUrl, 'url')}
       <div class="buttons"><button type="button" class="btn" id="test">Test connection</button></div>
       <ul class="report" id="report" hidden></ul>
@@ -24,6 +31,7 @@ export function renderSettings(root: HTMLElement, s: Settings, onClose: (saved: 
         ${field('Accurate', 'models.accurate', s.models.accurate)}
         ${field('Fast', 'models.fast', s.models.fast)}
       </div>
+      ${field('Think (used when Think is on)', 'models.thinking', s.models.thinking)}
     </fieldset>
     <fieldset>
       <legend>Hotkeys</legend>
@@ -66,7 +74,7 @@ export function renderSettings(root: HTMLElement, s: Settings, onClose: (saved: 
   const read = (): Settings => ({
     serverUrl: val('serverUrl'),
     searxngUrl: val('searxngUrl'),
-    models: { accurate: val('models.accurate'), fast: val('models.fast') },
+    models: { accurate: val('models.accurate'), fast: val('models.fast'), thinking: val('models.thinking') },
     hotkeys: { capture: val('hotkeys.capture'), region: val('hotkeys.region'), toggle: val('hotkeys.toggle') },
     maxAnswerTokens: num('maxAnswerTokens'),
     imageMaxSide: num('imageMaxSide'),
@@ -87,7 +95,7 @@ export function renderSettings(root: HTMLElement, s: Settings, onClose: (saved: 
     report.hidden = false
     report.innerHTML = ''
     try {
-      showReport(report, await window.lenz.testConnection(read()))
+      showReport(report, await window.lenz.testConnection(read(), val('apiKey')))
     } finally {
       testBtn.disabled = false
       testBtn.textContent = 'Test connection'
@@ -97,7 +105,7 @@ export function renderSettings(root: HTMLElement, s: Settings, onClose: (saved: 
   const errors = root.querySelector<HTMLUListElement>('#errors')!
   root.querySelector('#save')!.addEventListener('click', async () => {
     const next = read()
-    const r = await window.lenz.saveSettings(next)
+    const r = await window.lenz.saveSettings(next, val('apiKey'))
     if (r.ok) return onClose(await window.lenz.getSettings())
     errors.hidden = false
     errors.innerHTML = r.errors.map((e) => `<li>${esc(e)}</li>`).join('')
@@ -108,15 +116,15 @@ export function renderSettings(root: HTMLElement, s: Settings, onClose: (saved: 
 function showReport(el: HTMLElement, r: ConnectionReport): void {
   const items: string[] = []
   items.push(
-    r.ollama.ok
-      ? `<li class="ok">Ollama ${esc(r.ollama.version ?? '')} reachable in ${r.ollama.latencyMs} ms</li>`
-      : `<li class="bad">Can't reach Ollama: ${esc(r.ollama.error ?? 'unknown error')}</li>`
+    r.server.ok
+      ? `<li class="ok">C0RE reachable and key accepted (${r.server.latencyMs} ms)</li>`
+      : `<li class="bad">${esc(r.server.error ?? 'Unknown error')}</li>`
   )
-  if (r.ollama.ok) {
+  if (r.server.ok) {
     items.push(
       r.models.length
         ? `<li class="ok">Vision models: ${r.models.map((m) => esc(m.name) + (m.thinking ? ' (can think)' : '')).join(', ')}</li>`
-        : `<li class="bad">No vision models installed. On the PC run: ollama pull qwen3-vl:8b</li>`
+        : `<li class="bad">No vision models installed. On the PC run: ollama pull qwen3-vl:8b-instruct</li>`
     )
   }
   items.push(

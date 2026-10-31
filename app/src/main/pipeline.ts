@@ -24,7 +24,9 @@ export interface PipelineDeps {
   capture: () => Promise<CaptureResult>
   ocr: (png: Buffer) => Promise<OcrResult | null>
   imageOps: ImageOps
-  ollama: (baseUrl: string) => OllamaClient
+  /** The C0RE key ('' when none is saved). */
+  apiKey: () => string
+  ollama: (baseUrl: string, apiKey: string) => OllamaClient
   search: typeof runSearch
   emit: (e: AskEvent) => void
 }
@@ -35,6 +37,13 @@ export const TEMPERATURE = 0.3
 export const QUERY_MAX_TOKENS = 30
 export const PING_TIMEOUT_MS = 3000
 export const LOADING_HINT_MS = 1500
+export const MODEL_SWITCH_NOTICE = 'Switching model — the first answer takes a few extra seconds while it loads.'
+
+/** Think uses the thinking model; otherwise Fast or Accurate. */
+export function pickModel(s: Settings, req: Pick<AskRequest, 'speed' | 'think'>): string {
+  if (req.think) return s.models.thinking
+  return req.speed === 'fast' ? s.models.fast : s.models.accurate
+}
 
 const DEFAULT_QUESTION = "Explain what's on screen."
 
@@ -58,6 +67,29 @@ function describeError(e: unknown, model: string, partial: boolean): { code: Err
     switch (e.code) {
       case 'unreachable':
         return { code: 'pc_unreachable', message: "Can't reach your PC — check it's on and Tailscale is connected." }
+      case 'engine_offline':
+        return { code: 'engine_offline', message: "Your PC is on, but its AI engine (Ollama) is offline. Start Ollama on the PC." }
+      case 'missing_key':
+        return { code: 'c0re_key', message: 'Lenz needs its C0RE key. Paste it in Settings.' }
+      case 'invalid_key':
+        return {
+          code: 'c0re_key',
+          message: "C0RE didn't accept the key. Copy it again from the C0RE dashboard (Keys → eye button) into Settings."
+        }
+      case 'key_disabled':
+        return { code: 'c0re_key', message: "Lenz's key is switched off in C0RE. Turn it back on in the C0RE dashboard." }
+      case 'key_not_public':
+        return {
+          code: 'c0re_key',
+          message: "Lenz's key only works over Tailscale. Use the Tailscale address (http://kihurn-desktop:7080) in Settings."
+        }
+      case 'model_not_allowed':
+        return {
+          code: 'model_not_allowed',
+          message: `C0RE doesn't let Lenz use '${model}'. Allow it for the lenz key in the C0RE dashboard, or pick another model in Settings.`
+        }
+      case 'rate_limited':
+        return { code: 'rate_limited', message: 'Too many requests for the Lenz key — wait a moment and try again.' }
       case 'model_missing':
         return {
           code: 'model_missing',
@@ -89,6 +121,8 @@ export function createPipeline(deps: PipelineDeps) {
   let generation = 0
   /** A hotkey capture still in progress; an ask that arrives meanwhile waits for it instead of capturing again. */
   let pendingCapture: Promise<CaptureState> | null = null
+  /** The model of the last answer, to warn when Think swaps the thinking model in or out. */
+  let lastModel: string | null = null
 
   function stop(): void {
     generation++
@@ -161,7 +195,7 @@ export function createPipeline(deps: PipelineDeps) {
     }
 
     const s = deps.settings()
-    const model = req.speed === 'fast' ? s.models.fast : s.models.accurate
+    const model = pickModel(s, req)
     let emittedTokens = false
 
     try {
@@ -197,10 +231,17 @@ export function createPipeline(deps: PipelineDeps) {
       }
 
       // 2. Make sure the PC answers before doing anything slow.
-      const client = deps.ollama(s.serverUrl)
+      const client = deps.ollama(s.serverUrl, deps.apiKey())
       emit({ type: 'status', text: 'Connecting…' })
       await client.ping(PING_TIMEOUT_MS)
       check()
+
+      // Swapping the thinking model in or out makes Ollama reload; say so before the wait.
+      const thinkModel = s.models.thinking
+      if (lastModel !== model && (model === thinkModel || lastModel === thinkModel)) {
+        emit({ type: 'notice', text: MODEL_SWITCH_NOTICE })
+      }
+      lastModel = model
 
       const question = resolveQuestion(req.question, req.actionId, s.quickActions) || DEFAULT_QUESTION
 

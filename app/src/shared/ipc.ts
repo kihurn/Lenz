@@ -6,6 +6,7 @@ export const IPC = {
   event: 'lenz:event',
   getSettings: 'lenz:get-settings',
   saveSettings: 'lenz:save-settings',
+  hasKey: 'lenz:has-key',
   testConnection: 'lenz:test-connection',
   openExternal: 'lenz:open-external',
   openScreenSettings: 'lenz:open-screen-settings',
@@ -20,8 +21,12 @@ export interface LenzApi {
   stop(): void
   onEvent(cb: (e: AskEvent) => void): () => void
   getSettings(): Promise<Settings>
-  saveSettings(s: Settings): Promise<SaveResult>
-  testConnection(s: Settings): Promise<ConnectionReport>
+  /** `key` replaces the saved C0RE key; leave it empty to keep the saved one. */
+  saveSettings(s: Settings, key?: string): Promise<SaveResult>
+  /** Whether a C0RE key is saved (the key itself never reaches the panel). */
+  hasKey(): Promise<boolean>
+  /** Tests with the typed `key` if given, otherwise the saved one. */
+  testConnection(s: Settings, key?: string): Promise<ConnectionReport>
   openExternal(url: string): void
   openScreenSettings(): void
   hidePanel(): void

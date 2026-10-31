@@ -21,7 +21,19 @@ export type ChatChunk =
   | { type: 'thinking'; text: string }
   | { type: 'done'; doneReason: string }
 
-export type OllamaErrorCode = 'unreachable' | 'model_missing' | 'http' | 'stream'
+/** C0RE's own error codes, sent as `{"error":{"code","message"}}`. */
+export const GATEWAY_CODES = [
+  'missing_key',
+  'invalid_key',
+  'key_disabled',
+  'key_not_public',
+  'model_not_allowed',
+  'rate_limited',
+  'engine_offline'
+] as const
+export type GatewayCode = (typeof GATEWAY_CODES)[number]
+
+export type OllamaErrorCode = 'unreachable' | 'model_missing' | 'http' | 'stream' | GatewayCode
 
 export class OllamaError extends Error {
   constructor(
@@ -37,19 +49,49 @@ export class OllamaError extends Error {
 const STREAM_IDLE_MS = 60_000
 
 const toUnreachable = (e: unknown) =>
-  e instanceof OllamaError ? e : new OllamaError('unreachable', `Can't reach Ollama: ${String((e as Error)?.message ?? e)}`)
+  e instanceof OllamaError ? e : new OllamaError('unreachable', `Can't reach C0RE: ${String((e as Error)?.message ?? e)}`)
 
-export function createOllamaClient(baseUrl: string, fetchImpl: typeof fetch = fetch) {
+const isGatewayCode = (c: unknown): c is GatewayCode => GATEWAY_CODES.includes(c as GatewayCode)
+
+/** Turns an error body (C0RE's `{error:{code,message}}` or Ollama's `{error:"..."}`) into an OllamaError. */
+export function decodeError(status: number, text: string): OllamaError {
+  let err: unknown
+  try {
+    err = JSON.parse(text)?.error
+  } catch {
+    err = undefined
+  }
+  if (err && typeof err === 'object') {
+    const { code, message } = err as { code?: unknown; message?: unknown }
+    const msg = typeof message === 'string' && message ? message : `HTTP ${status}`
+    if (isGatewayCode(code)) return new OllamaError(code, msg)
+    if (code === 'model_missing') return new OllamaError('model_missing', msg)
+    return new OllamaError('http', `C0RE returned HTTP ${status}: ${msg}`)
+  }
+  const msg = typeof err === 'string' ? err : text.slice(0, 200)
+  if (status === 404 && /not found/i.test(msg)) return new OllamaError('model_missing', msg)
+  if (status === 401) return new OllamaError('invalid_key', msg || 'Unauthorized')
+  if (status === 503) return new OllamaError('engine_offline', msg || 'Service unavailable')
+  return new OllamaError('http', `C0RE returned HTTP ${status}: ${msg}`)
+}
+
+export function createOllamaClient(baseUrl: string, apiKey = '', fetchImpl: typeof fetch = fetch) {
   const url = (path: string) => `${baseUrl.replace(/\/+$/, '')}${path}`
+  const headers = (extra: Record<string, string> = {}): Record<string, string> =>
+    apiKey ? { ...extra, authorization: `Bearer ${apiKey}` } : extra
 
   async function getJson(path: string, init: RequestInit = {}, timeoutMs = 3000): Promise<any> {
     let res: Response
     try {
-      res = await fetchImpl(url(path), { ...init, signal: AbortSignal.timeout(timeoutMs) })
+      res = await fetchImpl(url(path), {
+        ...init,
+        headers: headers(init.body ? { 'content-type': 'application/json' } : {}),
+        signal: AbortSignal.timeout(timeoutMs)
+      })
     } catch (e) {
       throw toUnreachable(e)
     }
-    if (!res.ok) throw new OllamaError('http', `Ollama returned HTTP ${res.status} for ${path}`)
+    if (!res.ok) throw decodeError(res.status, await res.text().catch(() => ''))
     try {
       return await res.json()
     } catch (e) {
@@ -57,10 +99,11 @@ export function createOllamaClient(baseUrl: string, fetchImpl: typeof fetch = fe
     }
   }
 
-  async function ping(timeoutMs = 3000): Promise<{ version: string; latencyMs: number }> {
+  /** Checks C0RE answers and accepts the key (/api/tags needs a valid key). */
+  async function ping(timeoutMs = 3000): Promise<{ latencyMs: number }> {
     const t0 = Date.now()
-    const body = await getJson('/api/version', {}, timeoutMs)
-    return { version: String(body.version ?? 'unknown'), latencyMs: Date.now() - t0 }
+    await getJson('/api/tags', {}, timeoutMs)
+    return { latencyMs: Date.now() - t0 }
   }
 
   async function listModels(): Promise<ModelInfo[]> {
@@ -73,7 +116,8 @@ export function createOllamaClient(baseUrl: string, fetchImpl: typeof fetch = fe
           const caps: string[] = show.capabilities ?? []
           return { name, vision: caps.includes('vision'), thinking: caps.includes('thinking') }
         } catch {
-          return { name, vision: false, thinking: false }
+          // Capabilities unknown (e.g. the gateway doesn't pass /api/show): guess from the name.
+          return { name, vision: /vl|vision|llava/i.test(name), thinking: /qwen3/i.test(name) && !/instruct/i.test(name) }
         }
       })
     )
@@ -91,8 +135,8 @@ export function createOllamaClient(baseUrl: string, fetchImpl: typeof fetch = fe
       e instanceof OllamaError
         ? e
         : idle.signal.aborted
-          ? new OllamaError('stream', 'Ollama stopped responding.')
-          : new OllamaError(code, `Connection to Ollama failed: ${String((e as Error)?.message ?? e)}`)
+          ? new OllamaError('stream', 'Your PC stopped responding.')
+          : new OllamaError(code, `Connection to C0RE failed: ${String((e as Error)?.message ?? e)}`)
 
     touch()
     try {
@@ -100,13 +144,12 @@ export function createOllamaClient(baseUrl: string, fetchImpl: typeof fetch = fe
       try {
         res = await fetchImpl(url('/api/chat'), {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: headers({ 'content-type': 'application/json' }),
           body: JSON.stringify({
             model: req.model,
             messages: req.messages,
             stream: true,
             think: req.think,
-            keep_alive: -1,
             options: { temperature: req.temperature, num_ctx: req.numCtx, num_predict: req.numPredict }
           }),
           signal: combined
@@ -116,14 +159,8 @@ export function createOllamaClient(baseUrl: string, fetchImpl: typeof fetch = fe
         throw fail(e, 'unreachable')
       }
 
-      if (!res.ok) {
-        const text = await res.text().catch(() => '')
-        if (res.status === 404 && /not found/i.test(text)) {
-          throw new OllamaError('model_missing', `Model '${req.model}' is not installed on the PC.`)
-        }
-        throw new OllamaError('http', `Ollama returned HTTP ${res.status}: ${text.slice(0, 200)}`)
-      }
-      if (!res.body) throw new OllamaError('stream', 'Ollama sent an empty response.')
+      if (!res.ok) throw decodeError(res.status, await res.text().catch(() => ''))
+      if (!res.body) throw new OllamaError('stream', 'C0RE sent an empty response.')
 
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
@@ -148,9 +185,9 @@ export function createOllamaClient(baseUrl: string, fetchImpl: typeof fetch = fe
           try {
             obj = JSON.parse(line)
           } catch {
-            throw new OllamaError('stream', 'Ollama sent malformed data.')
+            throw new OllamaError('stream', 'C0RE sent malformed data.')
           }
-          if (obj.error) throw new OllamaError('http', String(obj.error))
+          if (obj.error) throw decodeError(200, JSON.stringify({ error: obj.error }))
           const thinking: string | undefined = obj.message?.thinking
           const text: string | undefined = obj.message?.content
           if (thinking) yield { type: 'thinking', text: thinking }
