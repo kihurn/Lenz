@@ -91,7 +91,13 @@ Header toggles:
 - **Auto / Text / Image**: what Lenz sends. Auto sends just the recognised text when the
   screen is mostly text (fastest) and the image for diagrams, graphs and handwriting.
 
-Lenz never saves your screenshots or conversations; they're gone when you close it.
+Follow-ups reuse the same screenshot, so they're fast. If you've moved on (another tab, page or
+app), just ask something like "what am I looking at now?", "what about this page?" or "look again".
+Lenz takes a new screenshot and the conversation carries on. ⌘Enter always captures first.
+
+**History** (clock icon) lists your past chats; click one to read it or carry on with a follow-up,
+which looks at your screen again. Chats are kept only on this Mac: questions, answers, sources and
+small thumbnails, never full screenshots. Turn it off or delete everything in Settings → History.
 
 ## When something goes wrong
 

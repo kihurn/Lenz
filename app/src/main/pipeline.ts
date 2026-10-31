@@ -1,4 +1,6 @@
-import type { AskEvent, AskRequest, ErrorCode, Settings } from '../shared/types'
+import { randomUUID } from 'node:crypto'
+import { turnLabel, type AskEvent, type AskRequest, type Conversation, type ErrorCode, type Settings, type Source, type StoredTurn } from '../shared/types'
+import { wantsFreshLook } from './fresh-look'
 import { OllamaError, type OllamaClient } from './ollama'
 import { decideMode, encodeImage, type ImageOps, type OcrResult } from './prepare'
 import { buildMessages, buildQueryMessages, resolveQuestion, type ScreenContext, type SearchContext, type Turn } from './prompts'
@@ -29,6 +31,8 @@ export interface PipelineDeps {
   ollama: (baseUrl: string, apiKey: string) => OllamaClient
   search: typeof runSearch
   emit: (e: AskEvent) => void
+  /** Saves a finished turn to chat history (skipped when history is off). */
+  record?: (conversationId: string, createdAt: number, turn: StoredTurn) => void
 }
 
 // Constant across requests: changing num_ctx makes Ollama reload the model.
@@ -55,6 +59,8 @@ interface CaptureState {
   ocr?: Promise<OcrResult | null>
   /** Whether the renderer has been sent this capture's thumbnail. */
   announced: boolean
+  /** Taken mid-conversation (a new look), so the panel keeps the thread. */
+  fresh?: boolean
 }
 
 function describeError(e: unknown, model: string, partial: boolean): { code: ErrorCode; message: string } {
@@ -123,6 +129,16 @@ export function createPipeline(deps: PipelineDeps) {
   let pendingCapture: Promise<CaptureState> | null = null
   /** The model of the last answer, to warn when Think swaps the thinking model in or out. */
   let lastModel: string | null = null
+  /** The chat being saved to history; a new one starts whenever the conversation resets. */
+  let conv: { id: string; createdAt: number } | null = null
+  /** The capture whose thumbnail is already saved with this chat. */
+  let recordedCapture: CaptureState | null = null
+
+  function newConversation(): void {
+    history = []
+    conv = null
+    recordedCapture = null
+  }
 
   function stop(): void {
     generation++
@@ -133,7 +149,7 @@ export function createPipeline(deps: PipelineDeps) {
   function setCapture(c: CaptureResult): void {
     stop()
     state = { capture: c, announced: false }
-    history = []
+    newConversation()
   }
 
   const readScreen = (st: CaptureState) => (st.ocr ??= deps.ocr(st.capture.png))
@@ -153,7 +169,7 @@ export function createPipeline(deps: PipelineDeps) {
         // A newer capture may have started meanwhile; never let an older one replace it.
         if (myGen === generation) {
           state = st
-          history = []
+          newConversation()
         }
         return st
       })()
@@ -178,7 +194,19 @@ export function createPipeline(deps: PipelineDeps) {
   function reset(): void {
     stop()
     state = null
-    history = []
+    newConversation()
+  }
+
+  /** Continues a saved chat: its turns become the history; the next ask looks at the screen afresh. */
+  function resume(c: Conversation): void {
+    stop()
+    state = null
+    history = c.turns.flatMap((t) => [
+      { role: 'user' as const, text: t.question },
+      { role: 'assistant' as const, text: t.answer }
+    ])
+    conv = { id: c.id, createdAt: c.createdAt }
+    recordedCapture = null
   }
 
   async function ask(req: AskRequest): Promise<void> {
@@ -206,15 +234,19 @@ export function createPipeline(deps: PipelineDeps) {
         check()
         if (adopted && state !== adopted) {
           state = adopted
-          history = []
+          newConversation()
         }
       }
-      if (req.newCapture || !state) {
-        emit({ type: 'status', text: 'Capturing…' })
+      // A follow-up about what's on screen *now* takes a new look but keeps the conversation.
+      const fresh = !req.newCapture && !!state && history.length > 0 && wantsFreshLook(req.question)
+      if (req.newCapture || !state || fresh) {
+        emit({ type: 'status', text: fresh ? 'Taking a new look…' : 'Capturing…' })
         const captured = await deps.capture()
         check()
+        // A resumed chat (no screen yet) keeps its history too; only an explicit new capture resets it.
+        if (req.newCapture) newConversation()
         state = { capture: captured, announced: false }
-        history = []
+        state.fresh = fresh || history.length > 0
       }
       const st = state
       if (!st.ocr) emit({ type: 'status', text: 'Reading screen…' })
@@ -227,7 +259,7 @@ export function createPipeline(deps: PipelineDeps) {
       }
       if (!st.announced || req.modeOverride) {
         st.announced = true
-        emit({ type: 'capture', thumbnailDataUrl: st.capture.thumbnailDataUrl, mode })
+        emit({ type: 'capture', thumbnailDataUrl: st.capture.thumbnailDataUrl, mode, ...(st.fresh ? { fresh: true } : {}) })
       }
 
       // 2. Make sure the PC answers before doing anything slow.
@@ -247,6 +279,7 @@ export function createPipeline(deps: PipelineDeps) {
 
       // 3. Optional web search. Failures never block the answer.
       let search: SearchContext | undefined
+      let sources: Source[] | undefined
       if (req.search) {
         try {
           let query = question
@@ -277,6 +310,7 @@ export function createPipeline(deps: PipelineDeps) {
             onStatus: (text) => emit({ type: 'status', text })
           })
           check()
+          sources = search.sources
           emit({ type: 'sources', sources: search.sources })
         } catch (e) {
           check()
@@ -322,6 +356,19 @@ export function createPipeline(deps: PipelineDeps) {
       check()
       history.push({ role: 'user', text: question }, { role: 'assistant', text: answer })
       emit({ type: 'done', truncated })
+      if (deps.record && s.saveHistory) {
+        conv ??= { id: randomUUID(), createdAt: Date.now() }
+        const action = req.actionId ? s.quickActions.find((a) => a.id === req.actionId) : undefined
+        const turn: StoredTurn = { label: turnLabel(req.question, action?.label), question, answer, at: Date.now() }
+        if (sources?.length) turn.sources = sources
+        if (recordedCapture !== st) turn.thumbnailDataUrl = st.capture.thumbnailDataUrl
+        recordedCapture = st
+        try {
+          deps.record(conv.id, conv.createdAt, turn)
+        } catch {
+          /* history is a convenience; never fail the answer over it */
+        }
+      }
     } catch (e) {
       if (e instanceof Aborted || !live()) return
       const { code, message } = describeError(e, model, emittedTokens)
@@ -331,7 +378,7 @@ export function createPipeline(deps: PipelineDeps) {
     }
   }
 
-  return { ask, stop, captureNow, setCapture, reset }
+  return { ask, stop, captureNow, setCapture, reset, resume }
 }
 
 export type Pipeline = ReturnType<typeof createPipeline>

@@ -59,7 +59,7 @@ export function createPanel(): BrowserWindow {
     fullscreenable: false,
     hasShadow: true,
     type: process.platform === 'darwin' ? 'panel' : undefined,
-    vibrancy: 'hud',
+    vibrancy: 'popover', // follows light/dark; CSS tints it to frosted glass
     visualEffectState: 'active',
     alwaysOnTop: true,
     webPreferences: secure

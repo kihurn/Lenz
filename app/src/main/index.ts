@@ -10,6 +10,7 @@ import { ocrHelperPath, runOcr } from './ocr'
 import { createOllamaClient, OllamaError } from './ollama'
 import { openScreenRecordingSettings } from './permissions'
 import { createPipeline } from './pipeline'
+import { createHistoryStore } from './history'
 import { checkKey, createKeyStore } from './secrets'
 import { pingSearxng, runSearch } from './search'
 import { loadSettings, saveSettings, SettingsSchema } from './settings'
@@ -19,6 +20,7 @@ let panel: BrowserWindow
 let settings: Settings
 const settingsFile = () => join(app.getPath('userData'), 'settings.json')
 let keyStore: ReturnType<typeof createKeyStore>
+let historyStore: ReturnType<typeof createHistoryStore>
 const apiKey = () => keyStore?.get() ?? ''
 
 function emit(e: AskEvent): void {
@@ -38,7 +40,8 @@ const pipeline = createPipeline({
   apiKey,
   ollama: (url, key) => createOllamaClient(url, key),
   search: runSearch,
-  emit
+  emit,
+  record: (id, createdAt, turn) => historyStore?.append(id, createdAt, turn)
 })
 
 let capturing = false
@@ -195,6 +198,20 @@ function registerIpc(): void {
     }
     return result
   })
+  ipcMain.handle(IPC.historyList, (e) => (fromPanel(e) ? historyStore.list() : []))
+  ipcMain.handle(IPC.historyOpen, (e, id) => {
+    if (!fromPanel(e) || typeof id !== 'string') return null
+    const c = historyStore.get(id)
+    if (c) pipeline.resume(c)
+    return c
+  })
+  ipcMain.handle(IPC.historyDelete, (e, id) => {
+    if (fromPanel(e) && typeof id === 'string') historyStore.remove(id)
+  })
+  ipcMain.handle(IPC.historyClear, (e) => {
+    if (fromPanel(e)) historyStore.clear()
+  })
+  ipcMain.on(IPC.newChat, (e) => fromPanel(e) && pipeline.reset())
   ipcMain.handle(IPC.testConnection, (e, s, typedKey) =>
     fromPanel(e) ? testConnection(s, typedKey) : Promise.reject(new Error('Not allowed.'))
   )
@@ -207,6 +224,7 @@ if (!app.requestSingleInstanceLock()) {
   void app.whenReady().then(() => {
     settings = loadSettings(settingsFile())
     keyStore = createKeyStore(join(app.getPath('userData'), 'c0re-key.bin'), safeStorage)
+    historyStore = createHistoryStore(join(app.getPath('userData'), 'history'))
     panel = createPanel()
     // ⌘W hides the panel; only Quit (⌘Q) ends Lenz.
     let quitting = false

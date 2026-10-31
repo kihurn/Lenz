@@ -40,7 +40,8 @@ export const SettingsSchema = z.object({
   }),
   quickActions: z
     .array(z.object({ id: z.string().min(1), label: z.string().min(1), prompt: z.string().min(1) }))
-    .max(12)
+    .max(12),
+  saveHistory: z.boolean()
 })
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -65,7 +66,8 @@ export const DEFAULT_SETTINGS: Settings = {
       prompt: "Write 3 short quiz questions on this, answers hidden under an 'Answers' heading."
     },
     { id: 'define', label: 'Define', prompt: 'Define the key terms on screen in one line each.' }
-  ]
+  ],
+  saveHistory: true
 }
 
 type Json = Record<string, unknown>

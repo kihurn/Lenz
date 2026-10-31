@@ -1,14 +1,18 @@
 import 'katex/dist/katex.min.css'
 import './styles.css'
-import type { AskEvent, AskRequest, ErrorCode, InputMode, Settings, Source, Speed } from '../shared/types'
+import { turnLabel, type AskEvent, type AskRequest, type Conversation, type ErrorCode, type InputMode, type Settings, type Source, type Speed } from '../shared/types'
+import { renderHistory } from './history-view'
 import { renderMarkdown } from './markdown'
 import { renderSettings } from './settings-view'
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!
 
 const el = {
+  shell: $('#shell'),
   chat: $('#chat-view'),
+  history: $('#history-view'),
   settings: $('#settings-view'),
+  seg: $('#seg'),
   capture: $('#capture'),
   thumb: $<HTMLImageElement>('#thumb'),
   modeLabel: $('#mode-label'),
@@ -67,6 +71,7 @@ function syncToggles(): void {
   for (const b of document.querySelectorAll<HTMLButtonElement>('[data-speed]')) {
     b.setAttribute('aria-pressed', String(b.dataset['speed'] === prefs.speed))
   }
+  el.seg.style.setProperty('--i', prefs.speed === 'fast' ? '0' : '1')
   el.think.setAttribute('aria-pressed', String(prefs.think))
   el.search.setAttribute('aria-pressed', String(prefs.search))
   el.mode.textContent = { auto: 'Auto', text: 'Text', image: 'Image' }[prefs.mode]
@@ -159,6 +164,21 @@ function renderSources(t: TurnView, sources: Source[]): void {
   t.root.append(list)
 }
 
+/** A marker in the thread where a follow-up took a new screenshot. */
+function markNewLook(thumb: string): void {
+  const mark = document.createElement('div')
+  mark.className = 'new-look'
+  const img = document.createElement('img')
+  img.src = thumb
+  img.alt = ''
+  const label = document.createElement('span')
+  label.textContent = 'Took a new look at your screen'
+  mark.append(img, label)
+  // Before the turn that triggered it, so it reads in order.
+  if (turn && turn.root.isConnected) el.thread.insertBefore(mark, turn.root)
+  else el.thread.append(mark)
+}
+
 function note(t: TurnView, text: string): void {
   const p = document.createElement('p')
   p.className = 'note'
@@ -215,10 +235,15 @@ function onEvent(e: AskEvent): void {
       syncToggles()
       break
     case 'capture':
-      if (!streaming) clearThread()
+      if (e.fresh) markNewLook(e.thumbnailDataUrl)
+      else if (!streaming) clearThread()
       el.capture.hidden = false
       el.thumb.src = e.thumbnailDataUrl
-      el.modeLabel.textContent = e.mode === 'text' ? 'Reading the text on screen' : 'Looking at the image'
+      el.modeLabel.textContent = e.fresh
+        ? 'Took a new look'
+        : e.mode === 'text'
+          ? 'Reading the text on screen'
+          : 'Looking at the image'
       if (!streaming) el.question.focus()
       break
     case 'status':
@@ -278,7 +303,7 @@ function ask(opts: { actionId?: string; newCapture?: boolean } = {}): void {
   const question = el.question.value.trim()
   const action = opts.actionId ? settings.quickActions.find((a) => a.id === opts.actionId) : undefined
   if (!question && !action && !opts.newCapture && el.capture.hidden) return
-  const label = [action?.label, question].filter(Boolean).join(' · ') || 'Explain'
+  const label = turnLabel(question, action?.label)
   el.question.value = ''
   autosize()
   send(
@@ -332,6 +357,7 @@ el.stop.addEventListener('click', () => {
 $('#recapture').addEventListener('click', () => ask({ newCapture: true }))
 $('#hide').addEventListener('click', () => window.lenz.hidePanel())
 $('#open-settings').addEventListener('click', () => void openSettings())
+$('#open-history').addEventListener('click', () => void openHistory())
 
 // Links in answers and sources open in the browser.
 el.thread.addEventListener('click', (e) => {
@@ -344,15 +370,82 @@ el.thread.addEventListener('click', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return
   if (!el.settings.hidden) closeSettings(null, false)
+  else if (!el.history.hidden) showView('chat')
   else window.lenz.hidePanel()
 })
+
+// The panel "materialises" each time it's shown.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return
+  el.shell.classList.remove('appear')
+  void el.shell.offsetWidth
+  el.shell.classList.add('appear')
+})
+
+// ---------- views ----------
+
+function showView(v: 'chat' | 'history' | 'settings'): void {
+  el.chat.hidden = v !== 'chat'
+  el.history.hidden = v !== 'history'
+  el.settings.hidden = v !== 'settings'
+  if (v !== 'history') el.history.replaceChildren()
+  if (v !== 'settings') el.settings.replaceChildren()
+  if (v === 'chat') el.question.focus()
+}
+
+// ---------- history ----------
+
+async function openHistory(): Promise<void> {
+  const chats = await window.lenz.historyList()
+  showView('history')
+  renderHistory(el.history, chats, {
+    open: (id) => void openConversation(id),
+    remove: (id) => window.lenz.historyDelete(id),
+    newChat: () => {
+      newChat()
+      showView('chat')
+    },
+    close: () => showView('chat')
+  })
+}
+
+function newChat(): void {
+  if (streaming) window.lenz.stop()
+  setStreaming(false)
+  window.lenz.newChat()
+  lastRequest = null
+  clearThread()
+  el.capture.hidden = true
+}
+
+async function openConversation(id: string): Promise<void> {
+  if (streaming) window.lenz.stop()
+  setStreaming(false)
+  const c: Conversation | null = await window.lenz.historyOpen(id)
+  if (!c) return void openHistory()
+  lastRequest = null
+  clearThread()
+  for (const t of c.turns) {
+    const v = startTurn(t.label)
+    v.text = t.answer
+    v.answer.classList.remove('streaming')
+    v.answer.innerHTML = renderMarkdown(t.answer)
+    if (t.sources) renderSources(v, t.sources)
+  }
+  turn = null
+  const thumb = [...c.turns].reverse().find((t) => t.thumbnailDataUrl)?.thumbnailDataUrl
+  el.capture.hidden = !thumb
+  if (thumb) el.thumb.src = thumb
+  el.modeLabel.textContent = 'Saved chat · your next question takes a new look'
+  showView('chat')
+  scrollDown()
+}
 
 // ---------- settings ----------
 
 async function openSettings(): Promise<void> {
   const [current, hasKey] = await Promise.all([window.lenz.getSettings(), window.lenz.hasKey()])
-  el.chat.hidden = true
-  el.settings.hidden = false
+  showView('settings')
   renderSettings(el.settings, current, hasKey, closeSettings)
 }
 
@@ -363,10 +456,7 @@ function closeSettings(saved: Settings | null, keySaved: boolean): void {
     el.notice.textContent = keySaved ? 'Settings and C0RE key saved.' : 'Settings saved.'
     el.notice.hidden = false
   }
-  el.settings.hidden = true
-  el.settings.replaceChildren()
-  el.chat.hidden = false
-  el.question.focus()
+  showView('chat')
 }
 
 const KEY_SYMBOLS: Record<string, string> = {

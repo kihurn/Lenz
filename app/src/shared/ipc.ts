@@ -1,4 +1,4 @@
-import type { AskEvent, AskRequest, ConnectionReport, SaveResult, Settings } from './types'
+import type { AskEvent, AskRequest, ConnectionReport, Conversation, ConversationSummary, SaveResult, Settings } from './types'
 
 export const IPC = {
   ask: 'lenz:ask',
@@ -7,6 +7,11 @@ export const IPC = {
   getSettings: 'lenz:get-settings',
   saveSettings: 'lenz:save-settings',
   hasKey: 'lenz:has-key',
+  historyList: 'lenz:history-list',
+  historyOpen: 'lenz:history-open',
+  historyDelete: 'lenz:history-delete',
+  historyClear: 'lenz:history-clear',
+  newChat: 'lenz:new-chat',
   testConnection: 'lenz:test-connection',
   openExternal: 'lenz:open-external',
   openScreenSettings: 'lenz:open-screen-settings',
@@ -27,6 +32,14 @@ export interface LenzApi {
   hasKey(): Promise<boolean>
   /** Tests with the typed `key` if given, otherwise the saved one. */
   testConnection(s: Settings, key?: string): Promise<ConnectionReport>
+  /** Past chats, newest first. */
+  historyList(): Promise<ConversationSummary[]>
+  /** Loads a past chat and makes it the current conversation. */
+  historyOpen(id: string): Promise<Conversation | null>
+  historyDelete(id: string): Promise<void>
+  historyClear(): Promise<void>
+  /** Forgets the current conversation and screenshot. */
+  newChat(): void
   openExternal(url: string): void
   openScreenSettings(): void
   hidePanel(): void

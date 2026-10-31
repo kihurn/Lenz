@@ -138,6 +138,73 @@ describe('pipeline', () => {
     expect(notices()).toBe(2)
   })
 
+  it('takes a new look for "what am I looking at now?" but keeps the conversation', async () => {
+    const { p, events, mock, captures } = await setup()
+    await p.ask(ask({ question: 'what is ATP?' }))
+    events.length = 0
+    await p.ask(ask({ question: 'ok what am I looking at now?', newCapture: false }))
+    expect(captures()).toBe(2)
+    expect(events.find((e) => e.type === 'capture')).toMatchObject({ fresh: true })
+    expect(events.some((e) => e.type === 'cleared')).toBe(false)
+    expect(mock.lastChatBody().messages).toHaveLength(4) // system + previous Q&A + new question
+  })
+
+  it('reuses the screenshot for an ordinary follow-up', async () => {
+    const { p, captures } = await setup()
+    await p.ask(ask({ question: 'what is ATP?' }))
+    await p.ask(ask({ question: 'explain step 2 more', newCapture: false }))
+    expect(captures()).toBe(1)
+  })
+
+  it('does not take a new look on the first question about a capture', async () => {
+    const { p, captures } = await setup()
+    await p.captureNow() // the hotkey just took the screenshot
+    await p.ask(ask({ question: 'what is this page?', newCapture: false }))
+    expect(captures()).toBe(1)
+  })
+
+  it('records finished turns to history, one chat per conversation', async () => {
+    const saved: { id: string; label: string; thumb?: string }[] = []
+    const { p } = await setup({}, { record: (id, _c, t) => saved.push({ id, label: t.label, thumb: t.thumbnailDataUrl }) })
+    await p.ask(ask({ question: 'q1' }))
+    await p.ask(ask({ question: '', actionId: 'summarize', newCapture: false }))
+    await p.ask(ask({ question: 'q3', newCapture: true }))
+    expect(saved.map((s) => s.label)).toEqual(['q1', 'Summarize', 'q3'])
+    expect(saved[0]!.id).toBe(saved[1]!.id)
+    expect(saved[2]!.id).not.toBe(saved[0]!.id)
+    expect(saved.map((s) => !!s.thumb)).toEqual([true, false, true])
+  })
+
+  it('does not record when history is off', async () => {
+    const saved: unknown[] = []
+    const { p } = await setup({}, {
+      settings: () => ({ ...DEFAULT_SETTINGS, serverUrl: mock!.url, saveHistory: false }),
+      record: (...a) => saved.push(a)
+    })
+    await p.ask(ask())
+    expect(saved).toEqual([])
+  })
+
+  it('resumes a saved chat: history is sent and the next ask captures afresh into the same chat', async () => {
+    const saved: string[] = []
+    const { p, mock, captures, events } = await setup({}, { record: (id) => saved.push(id) })
+    const id = '00000000-0000-4000-8000-000000000001'
+    p.resume({
+      id,
+      title: 'old',
+      createdAt: 1,
+      updatedAt: 2,
+      turns: [{ label: 'old q', question: 'old q', answer: 'old a', at: 2 }]
+    })
+    await p.ask(ask({ question: 'and a follow-up', newCapture: false }))
+    expect(captures()).toBe(1)
+    const msgs = mock.lastChatBody().messages
+    expect(msgs[1]).toMatchObject({ role: 'user', content: 'old q' })
+    expect(msgs[2]).toMatchObject({ role: 'assistant', content: 'old a' })
+    expect(saved).toEqual([id])
+    expect(events.find((e) => e.type === 'capture')).toMatchObject({ fresh: true })
+  })
+
   it('sends the saved C0RE key', async () => {
     const { p, events, mock } = await setup({ requireKey: 'c0re_test' })
     await p.ask(ask())

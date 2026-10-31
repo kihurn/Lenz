@@ -66,6 +66,23 @@ Try each, and check the label under the thumbnail:
 - [ ] Pressing ⌘⇧Space while an answer is streaming stops it, clears the panel and starts fresh
       (Stop button disappears, no leftover "Capturing…" text).
 - [ ] The Auto/Text/Image toggle goes back to Auto after each new capture.
+- [ ] Ask a question, switch to another tab, then ask "what am I looking at now?": Lenz shows
+      "Took a new look at your screen" in the conversation and answers about the new tab.
+- [ ] An ordinary follow-up ("explain step 2 more") does not take a new screenshot.
+
+## History
+
+- [ ] After a few questions, the clock icon lists the chat under Today with its thumbnail.
+- [ ] Clicking a chat shows its questions and answers; a follow-up continues it (and it moves to the top).
+- [ ] Search chats filters the list; the × on a row deletes it.
+- [ ] Settings → History: turning "Save chats on this Mac" off stops new chats being saved;
+      "Delete all chats" (press twice) empties the list.
+
+## Look
+
+- [ ] Light and dark mode both look frosted (desktop colours softly visible, text easy to read).
+- [ ] Fast/Accurate pill slides; Think and Search show a small red light when on.
+- [ ] With System Settings → Accessibility → Display → Reduce transparency on, the panel turns solid.
 
 ## Search
 

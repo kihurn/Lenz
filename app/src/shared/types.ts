@@ -43,7 +43,8 @@ export type AskEvent =
   /** A new capture replaced the conversation; the panel should drop the old one. */
   | { type: 'cleared' }
   | { type: 'status'; text: string }
-  | { type: 'capture'; thumbnailDataUrl: string; mode: InputMode }
+  /** `fresh`: a follow-up took a new look; the conversation carries on. */
+  | { type: 'capture'; thumbnailDataUrl: string; mode: InputMode; fresh?: boolean }
   | { type: 'thinking'; active: boolean }
   | { type: 'token'; text: string }
   | { type: 'sources'; sources: Source[] }
@@ -60,6 +61,8 @@ export interface Settings {
   imageMaxSide: number
   search: { results: number; pagesToRead: number; pageTimeoutMs: number; budgetMs: number }
   quickActions: QuickAction[]
+  /** Keep past chats on this Mac (questions, answers, small thumbnails). */
+  saveHistory: boolean
 }
 
 export type SaveResult = { ok: true } | { ok: false; errors: string[] }
@@ -75,4 +78,37 @@ export interface ConnectionReport {
   server: { ok: boolean; latencyMs?: number; error?: string }
   models: ModelInfo[]
   searxng: { ok: boolean; error?: string }
+}
+
+export interface StoredTurn {
+  /** What the panel showed as the question, e.g. "Explain · what is ATP?". */
+  label: string
+  /** The question as sent to the model (quick-action prompt included). */
+  question: string
+  answer: string
+  sources?: Source[]
+  /** Set on the turn that used a new screenshot. */
+  thumbnailDataUrl?: string
+  at: number
+}
+
+export interface Conversation {
+  id: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  turns: StoredTurn[]
+}
+
+export interface ConversationSummary {
+  id: string
+  title: string
+  updatedAt: number
+  turns: number
+  thumbnailDataUrl?: string
+}
+
+/** The panel's label for a question, shared so saved chats match what was shown. */
+export function turnLabel(question: string, actionLabel?: string): string {
+  return [actionLabel, question.trim()].filter(Boolean).join(' · ') || 'Explain'
 }
